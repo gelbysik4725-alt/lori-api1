@@ -6,7 +6,6 @@ header('Content-Type: application/json; charset=utf-8');
 $botToken = "8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo";
 $adminId  = 8875180956;
 
-// Автоматическое создание/чтение файла базы данных
 $file = "database.json";
 $db = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
 if (!is_array($db)) $db = [];
@@ -32,7 +31,6 @@ if ($action === "check") {
     $keyData = $db[$key];
     $currentTime = time();
 
-    // Проверка истечения срока
     if ($keyData['expires'] !== 0 && $currentTime > $keyData['expires']) {
         unset($db[$key]);
         file_put_contents($file, json_encode($db, JSON_PRETTY_PRINT));
@@ -43,7 +41,6 @@ if ($action === "check") {
     $activations = $keyData['activations'] ?? [];
     $maxLimit = intval($keyData['max'] ?? 1);
 
-    // Если HWID уже привязан — пускаем и обновляем IP
     foreach ($activations as &$act) {
         if ($act['hwid'] === $hwid) {
             $act['ip'] = $ip;
@@ -54,9 +51,7 @@ if ($action === "check") {
     }
     unset($act);
 
-    // Если устройство новое
     if (count($activations) < $maxLimit) {
-        // Если ключ активируется впервые — запускаем таймер
         if ($keyData['first_use'] == 0) {
             $db[$key]['first_use'] = $currentTime;
             if ($keyData['duration'] > 0) {
@@ -127,7 +122,7 @@ if (isset($update['pre_checkout_query'])) {
     exit;
 }
 
-// Автоматическая генерация ключа при оплате Звездами
+// Покупка через магазин (пользователи)
 if (isset($update['message']['successful_payment'])) {
     $chatId = $update['message']['chat']['id'];
     $payload = $update['message']['successful_payment']['invoice_payload'];
@@ -151,10 +146,38 @@ if (isset($update['message']['successful_payment'])) {
     exit;
 }
 
-// Команды
+// Сообщения и диалог генерации для админа
 if (isset($update['message'])) {
     $chatId = intval($update['message']['chat']['id']);
     $text = trim($update['message']['text']);
+
+    // Проверяем, не вводит ли админ параметры для ручного создания ключа через чат
+    if ($chatId === intval($adminId) && strpos($text, '/gen ') === 0) {
+        // Формат команды от админа: /gen [часы] [лимит]
+        // Пример: /gen 72 5  (создать ключ на 72 часа с лимитом в 5 устройств)
+        // Пример: /gen 0 999 (создать бессрочный ключ на 999 устройств)
+        $args = explode(" ", $text);
+        $hours = intval($args[1] ?? 24);
+        $maxLimit = intval($args[2] ?? 1);
+        if ($maxLimit < 1) $maxLimit = 1;
+        if ($maxLimit > 999) $maxLimit = 999;
+
+        $duration = ($hours == 0) ? 0 : ($hours * 3600);
+        $newKey = "LORI-ADM-" . strtoupper(substr(md5(rand() . time()), 0, 8));
+
+        $db[$newKey] = [
+            "duration" => $duration,
+            "expires" => 0,
+            "first_use" => 0,
+            "max" => $maxLimit,
+            "activations" => []
+        ];
+        file_put_contents($file, json_encode($db, JSON_PRETTY_PRINT));
+
+        $termText = ($hours == 0) ? "Бессрочно" : "$hours часов";
+        sendMessage($chatId, "✅ **Ключ успешно создан вручную!**\n\n🔑 Ключ: `$newKey`\n⏳ Срок: $termText (после активации)\n👥 Лимит устройств: $maxLimit");
+        exit;
+    }
 
     if ($text === "/start") {
         $keyboard = [
@@ -201,7 +224,8 @@ if (isset($update['callback_query'])) {
     } 
     elseif ($data === 'admin_panel' && $chatId === intval($adminId)) {
         $total = count($db);
-        $text = "👑 **Панель администратора**\n\nВсего ключей в базе: $total";
+        $text = "👑 **Панель администратора**\n\nВсего ключей в базе: $total\n\nДля генерации ключа вручную отправьте в чат команду в формате:\n`/gen [часы] [лимит_устройств]`\n\n*Примеры:*\n`/gen 24 1` (на 24 часа, 1 устр)\n`/gen 720 5` (на 30 дней, 5 устр)\n`/gen 0 999` (навсегда, 999 устр)";
+        
         $keyboard = [
             'inline_keyboard' => [
                 [['text' => '📋 Список ключей (Управление)', 'callback_data' => 'adm_list']],
