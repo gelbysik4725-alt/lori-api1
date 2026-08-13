@@ -36,13 +36,23 @@ function addLog($text) {
     saveDb();
 }
 
-$action = $_GET['action'] ?? '';
-
-// --- ЛОГИРОВАНИЕ ЗАПРОСОВ К API ---
-if (!empty($action)) {
-    $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
-    // Можно включить детальное логирование: addLog("API Request: action=$action from IP $ip");
+// Вспомогательная функция для форматирования оставшегося времени
+function formatRemainingTime($expires, $firstUse, $duration, $isFrozen) {
+    if ($duration == 0) return "♾️ Бессрочный";
+    if ($firstUse == 0) return "⏳ Не активирован (" . floor($duration / 86400) . " дн.)";
+    if ($isFrozen) return "❄️ Заморожен";
+    
+    $remains = $expires - time();
+    if ($remains <= 0) return "🔴 Истек";
+    
+    $days = floor($remains / 86400);
+    $hours = floor(($remains % 86400) / 3600);
+    $minutes = floor(($remains % 3600) / 60);
+    
+    return "🟢 {$days}д {$hours}ч {$minutes}м";
 }
+
+$action = $_GET['action'] ?? '';
 
 // --- 0. ОБЛАЧНОЕ ОБНОВЛЕНИЕ И СТАТУС (OTA) ---
 if ($action === "status_check") {
@@ -168,6 +178,12 @@ function sendMessage($chat_id, $text, $reply_markup = null) {
     tgRequest('sendMessage', $data);
 }
 
+function editMessage($chat_id, $message_id, $text, $reply_markup = null) {
+    $data = ['chat_id' => $chat_id, 'message_id' => $message_id, 'text' => $text, 'parse_mode' => 'Markdown'];
+    if ($reply_markup) $data['reply_markup'] = $reply_markup;
+    tgRequest('editMessageText', $data);
+}
+
 function sendInvoice($chat_id, $title, $description, $payload, $stars) {
     $data = [
         'chat_id' => $chat_id,
@@ -212,7 +228,7 @@ if (isset($update['message']['successful_payment'])) {
         "is_frozen" => false
     ];
     saveDb();
-    addLog("Куплен ключ $newUserKey пользователем $chatId");
+    addLog("Куплен ключ $newKey пользователем $chatId");
 
     sendMessage($chatId, "🎉 **Оплата успешно прошла!**\n\nВаш персональный ключ доступа:\n`$newKey`\n\n*Управлять ключом (сброс HWID, заморозка) можно в главном меню в разделе «Мои ключи»*");
     exit;
@@ -226,7 +242,6 @@ if (isset($update['message'])) {
     // Проверка на админские команды через чат
     if ($chatId === intval($adminId)) {
         if (strpos($text, '/gen ') === 0) {
-            // /gen [часы] [лимит] [тип: 1, 7, 30 и т.д.]
             $args = explode(" ", $text);
             $hours = intval($args[1] ?? 24);
             $maxLimit = intval($args[2] ?? 1);
@@ -250,7 +265,6 @@ if (isset($update['message'])) {
             exit;
         }
         
-        // Выдача ключа пользователю по Telegram ID: /give [tg_id] [часы] [лимит]
         if (strpos($text, '/give ') === 0) {
             $args = explode(" ", $text);
             $targetUser = intval($args[1] ?? 0);
@@ -282,7 +296,6 @@ if (isset($update['message'])) {
             exit;
         }
 
-        // Рассылка: /broadcast текст
         if (strpos($text, '/broadcast ') === 0) {
             $msgText = substr($text, 11);
             $usersToNotify = [];
@@ -343,7 +356,8 @@ if (isset($update['callback_query'])) {
             sendInvoice($chatId, $titles[$dur][0], "Доступ к скрипту (лимит: $max устр.)", "sub_{$dur}_{$max}", $titles[$dur][1]);
         }
     } 
-    elseif ($data === 'my_keys') {
+    // Меню выбора ключей пользователя
+    elseif ($data === 'my_keys' || $data === 'back_home_keys') {
         $userKeys = [];
         foreach ($db['keys'] as $k => $kd) {
             if (isset($kd['owner_tg']) && intval($kd['owner_tg']) === $chatId) {
@@ -352,45 +366,47 @@ if (isset($update['callback_query'])) {
         }
 
         if (empty($userKeys)) {
-            sendMessage($chatId, "📭 У вас нет активных ключей. Вы можете купить их в главном меню.");
+            editMessage($chatId, $messageId, "📭 У вас нет активных ключей. Вы можете купить их в главном меню.", [
+                'inline_keyboard' => [[['text' => '« На главную', 'callback_data' => 'back_home']]]
+            ]);
             return;
         }
 
+        $inlineKeyboard = [];
         foreach ($userKeys as $k => $d) {
+            $shortKey = substr($k, 0, 12) . "...";
+            $statusIcon = ($d['first_use'] == 0) ? "⏳" : (($d['expires'] == 0 || $d['expires'] > time()) ? "🟢" : "🔴");
+            if (!empty($d['is_frozen'])) $statusIcon = "❄️";
+            
+            $inlineKeyboard[] = [['text' => "$statusIcon $shortKey", 'callback_data' => 'manage_key_' . $k]];
+        }
+        $inlineKeyboard[] = [['text' => '« На главную', 'callback_data' => 'back_home']];
+
+        editMessage($chatId, $messageId, "🔑 **Ваши ключи:**\nВыберите ключ из списка ниже для управления:", ['inline_keyboard' => $inlineKeyboard]);
+    }
+    // Управление конкретным ключом пользователя
+    elseif (strpos($data, 'manage_key_') === 0) {
+        $keyToManage = str_replace('manage_key_', '', $data);
+        if (isset($db['keys'][$keyToManage]) && intval($db['keys'][$keyToManage]['owner_tg']) === $chatId) {
+            $d = $db['keys'][$keyToManage];
             $usedCount = count($d['activations'] ?? []);
             $maxLimit = $d['max'] ?? 1;
-            
-            if ($d['first_use'] == 0) {
-                $status = "⏳ Не активирован";
-            } else {
-                $remains = $d['expires'] - time();
-                if ($d['expires'] == 0) {
-                    $status = "♾️ Бессрочный";
-                } elseif ($remains > 0) {
-                    $days = floor($remains / 86400);
-                    $hours = floor(($remains % 86400) / 3600);
-                    $status = "🟢 Активен (осталось {$days}д {$hours}ч)";
-                } else {
-                    $status = "🔴 Истек";
-                }
-            }
+            $timeStatus = formatRemainingTime($d['expires'], $d['first_use'], $d['duration'], !empty($d['is_frozen']));
 
-            if (!empty($d['is_frozen'])) $status = "❄️ Заморожен";
-
-            $info = "🔑 Ключ: `$k`\n";
-            $info .= "📌 Статус: $status\n";
+            $info = "🔑 Ключ: `$keyToManage`\n";
+            $info .= "📌 Остаток времени: $timeStatus\n";
             $info .= "👥 Устройства: {$usedCount}/{$maxLimit}\n";
             $info .= "🔄 Сбросов HWID осталось: {$d['reset_left']}\n";
             $info .= "❄️ Заморозок осталось: {$d['freeze_left']}\n";
 
             $kb = [
                 'inline_keyboard' => [
-                    [['text' => '🔄 Сбросить HWID', 'callback_data' => 'user_reset_' . $k]],
-                    [['text' => (!empty($d['is_frozen']) ? '🔥 Разморозить' : '❄️ Заморозить'), 'callback_data' => 'user_freeze_' . $k]],
-                    [['text' => '« На главную', 'callback_data' => 'back_home']]
+                    [['text' => '🔄 Сбросить HWID', 'callback_data' => 'user_reset_' . $keyToManage]],
+                    [['text' => (!empty($d['is_frozen']) ? '🔥 Разморозить' : '❄️ Заморозить'), 'callback_data' => 'user_freeze_' . $keyToManage]],
+                    [['text' => '« К списку ключей', 'callback_data' => 'back_home_keys']]
                 ]
             ];
-            sendMessage($chatId, $info, $kb);
+            editMessage($chatId, $messageId, $info, $kb);
         }
     }
     // Сброс HWID пользователем
@@ -401,9 +417,27 @@ if (isset($update['callback_query'])) {
                 $db['keys'][$keyToReset]['activations'] = [];
                 $db['keys'][$keyToReset]['reset_left']--;
                 saveDb();
-                sendMessage($chatId, "✅ Привязки успешно сброшены! Осталось сбросов: {$db['keys'][$keyToReset]['reset_left']}");
+                
+                // Перенаправляем обратно в меню управления этим ключом
+                $cq['data'] = 'manage_key_' . $keyToReset;
+                // Имитируем обновление данных для вывода
+                $d = $db['keys'][$keyToReset];
+                $usedCount = count($d['activations'] ?? []);
+                $maxLimit = $d['max'] ?? 1;
+                $timeStatus = formatRemainingTime($d['expires'], $d['first_use'], $d['duration'], !empty($d['is_frozen']));
+
+                $info = "✅ Привязки успешно сброшены!\n\n🔑 Ключ: `$keyToReset`\n📌 Остаток времени: $timeStatus\n👥 Устройства: {$usedCount}/{$maxLimit}\n🔄 Сбросов HWID осталось: {$d['reset_left']}\n❄️ Заморозок осталось: {$d['freeze_left']}";
+
+                $kb = [
+                    'inline_keyboard' => [
+                        [['text' => '🔄 Сбросить HWID', 'callback_data' => 'user_reset_' . $keyToReset]],
+                        [['text' => (!empty($d['is_frozen']) ? '🔥 Разморозить' : '❄️ Заморозить'), 'callback_data' => 'user_freeze_' . $keyToReset]],
+                        [['text' => '« К списку ключей', 'callback_data' => 'back_home_keys']]
+                    ]
+                ];
+                editMessage($chatId, $messageId, $info, $kb);
             } else {
-                sendMessage($chatId, "❌ У вас закончились бесплатные сбросы HWID для этого ключа.");
+                tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '❌ У вас закончились бесплатные сбросы HWID!', 'show_alert' => true]);
             }
         }
     }
@@ -412,7 +446,6 @@ if (isset($update['callback_query'])) {
         $keyToFreeze = str_replace('user_freeze_', '', $data);
         if (isset($db['keys'][$keyToFreeze]) && intval($db['keys'][$keyToFreeze]['owner_tg']) === $chatId) {
             $kd = &$db['keys'][$keyToFreeze];
-            // Проверка сброса лимита раз в неделю
             if (time() > $kd['freeze_reset_time']) {
                 $kd['freeze_left'] = 2;
                 $kd['freeze_reset_time'] = time() + 604800;
@@ -423,15 +456,36 @@ if (isset($update['callback_query'])) {
                     $kd['is_frozen'] = true;
                     $kd['freeze_left']--;
                     saveDb();
-                    sendMessage($chatId, "❄️ Ключ успешно заморожен! Время истечения приостановлено.");
+                    tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '❄️ Ключ заморожен!', 'show_alert' => false]);
                 } else {
-                    sendMessage($chatId, "❌ Лимит заморозок на этой неделе исчерпан.");
+                    tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '❌ Лимит заморозок исчерпан!', 'show_alert' => true]);
                 }
             } else {
                 $kd['is_frozen'] = false;
                 saveDb();
-                sendMessage($chatId, "🔥 Ключ разморожен и снова активен!");
+                tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '🔥 Ключ разморожен!', 'show_alert' => false]);
             }
+
+            // Обновляем отображение панели ключа
+            $d = $db['keys'][$keyToFreeze];
+            $usedCount = count($d['activations'] ?? []);
+            $maxLimit = $d['max'] ?? 1;
+            $timeStatus = formatRemainingTime($d['expires'], $d['first_use'], $d['duration'], !empty($d['is_frozen']));
+
+            $info = "🔑 Ключ: `$keyToFreeze`\n";
+            $info .= "📌 Остаток времени: $timeStatus\n";
+            $info .= "👥 Устройства: {$usedCount}/{$maxLimit}\n";
+            $info .= "🔄 Сбросов HWID осталось: {$d['reset_left']}\n";
+            $info .= "❄️ Заморозок осталось: {$d['freeze_left']}\n";
+
+            $kb = [
+                'inline_keyboard' => [
+                    [['text' => '🔄 Сбросить HWID', 'callback_data' => 'user_reset_' . $keyToFreeze]],
+                    [['text' => (!empty($d['is_frozen']) ? '🔥 Разморозить' : '❄️ Заморозить'), 'callback_data' => 'user_freeze_' . $keyToFreeze]],
+                    [['text' => '« К списку ключей', 'callback_data' => 'back_home_keys']]
+                ]
+            ];
+            editMessage($chatId, $messageId, $info, $kb);
         }
     }
     // Админ-панель
@@ -454,9 +508,8 @@ if (isset($update['callback_query'])) {
                 [['text' => '« На главную', 'callback_data' => 'back_home']]
             ]
         ];
-        tgRequest('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'Markdown', 'reply_markup' => $keyboard]);
+        editMessage($chatId, $messageId, $text, $keyboard);
     } 
-    // Настройки статуса и OTA для админа
     elseif ($data === 'adm_settings' && $chatId === intval($adminId)) {
         $st = $db['settings']['status'];
         $ver = $db['settings']['version'];
@@ -466,7 +519,7 @@ if (isset($update['callback_query'])) {
                 [['text' => '« В админку', 'callback_data' => 'admin_panel']]
             ]
         ];
-        sendMessage($chatId, "⚙️ **Текущие настройки OTA:**\nВерсия: `$ver`\nСтатус: `$st`", $kb);
+        editMessage($chatId, $messageId, "⚙️ **Текущие настройки OTA:**\nВерсия: `$ver`\nСтатус: `$st`", $kb);
     }
     elseif ($data === 'toggle_status' && $chatId === intval($adminId)) {
         $current = $db['settings']['status'];
@@ -474,51 +527,99 @@ if (isset($update['callback_query'])) {
         elseif ($current === 'maintenance') $db['settings']['status'] = 'update';
         else $db['settings']['status'] = 'online';
         saveDb();
-        sendMessage($chatId, "✅ Статус изменен на: `{$db['settings']['status']}`");
+        
+        $st = $db['settings']['status'];
+        $ver = $db['settings']['version'];
+        $kb = [
+            'inline_keyboard' => [
+                [['text' => "Статус: " . ($st == 'online' ? '🟢 Online' : ($st == 'maintenance' ? '🛠 Обслуживание' : '🚀 Обновление')), 'callback_data' => 'toggle_status']],
+                [['text' => '« В админку', 'callback_data' => 'admin_panel']]
+            ]
+        ];
+        editMessage($chatId, $messageId, "✅ Статус изменен!\n\n⚙️ **Текущие настройки OTA:**\nВерсия: `$ver`\nСтатус: `$st`", $kb);
     }
-    // Логи активности для админа
     elseif ($data === 'adm_logs' && $chatId === intval($adminId)) {
         $logText = "📜 **Последние логи активности:**\n\n";
         $logs = array_slice($db['logs'], 0, 15);
         foreach ($logs as $l) {
             $logText .= "`" . date("H:i:s", $l['time']) . "` — " . $l['text'] . "\n";
         }
-        $kb = [['inline_keyboard' => [[['text' => '« В админку', 'callback_data' => 'admin_panel']]]];
-        sendMessage($chatId, $logText, $kb);
+        $kb = ['inline_keyboard' => [[['text' => '« В админку', 'callback_data' => 'admin_panel']]]];
+        editMessage($chatId, $messageId, $logText, $kb);
     }
-    // Список ключей в админке с бесконечным сбросом HWID и баном
+    // Список ключей в админке с выбором через удобное меню
     elseif ($data === 'adm_list' && $chatId === intval($adminId)) {
         if (empty($db['keys'])) {
-            sendMessage($chatId, "📭 База ключей пуста.");
+            editMessage($chatId, $messageId, "📭 База ключей пуста.", [
+                'inline_keyboard' => [[['text' => '« В админку', 'callback_data' => 'admin_panel']]]
+            ]);
             return;
         }
 
+        $inlineKeyboard = [];
         foreach ($db['keys'] as $k => $d) {
+            $shortKey = substr($k, 0, 12) . "...";
+            $owner = $d['owner_tg'] ?? 0;
+            $inlineKeyboard[] = [['text' => "🔑 $shortKey (TG: $owner)", 'callback_data' => 'adm_manage_' . $k]];
+        }
+        $inlineKeyboard[] = [['text' => '« В админку', 'callback_data' => 'admin_panel']];
+
+        editMessage($chatId, $messageId, "📋 **Выберите ключ для администрирования:**", ['inline_keyboard' => $inlineKeyboard]);
+    }
+    // Управление конкретным ключом в админке
+    elseif (strpos($data, 'adm_manage_') === 0 && $chatId === intval($adminId)) {
+        $key = str_replace('adm_manage_', '', $data);
+        if (isset($db['keys'][$key])) {
+            $d = $db['keys'][$key];
             $usedCount = count($d['activations'] ?? []);
             $maxLimit = $d['max'] ?? 1;
-            $info = "🔑 `$k` (Лимит: {$usedCount}/{$maxLimit})\nВладелец Telegram ID: `{$d['owner_tg']}`\n";
+            $timeStatus = formatRemainingTime($d['expires'], $d['first_use'], $d['duration'], !empty($d['is_frozen']));
+
+            $info = "👑 **Управление ключом (Админ)**\n\n";
+            $info .= "🔑 Ключ: `$key`\n";
+            $info .= "📌 Остаток времени: $timeStatus\n";
+            $info .= "👥 Устройства: {$usedCount}/{$maxLimit}\n";
+            $info .= "👤 Владелец Telegram ID: `{$d['owner_tg']}`\n";
 
             $kb = [
                 'inline_keyboard' => [
-                    [['text' => '🔄 Сбросить HWID (Админ)', 'callback_data' => 'adm_reset_' . $k]],
-                    [['text' => '⛔ В черный список (HWID/IP)', 'callback_data' => 'adm_ban_' . $k]],
-                    [['text' => '❌ Удалить ключ', 'callback_data' => 'adm_del_' . $k]],
-                    [['text' => '« В админку', 'callback_data' => 'admin_panel']]
+                    [['text' => '🔄 Сбросить HWID', 'callback_data' => 'adm_reset_' . $key]],
+                    [['text' => '⛔ В черный список (HWID/IP)', 'callback_data' => 'adm_ban_' . $key]],
+                    [['text' => '❌ Удалить ключ', 'callback_data' => 'adm_del_' . $key]],
+                    [['text' => '« К списку ключей', 'callback_data' => 'adm_list']]
                 ]
             ];
-            sendMessage($chatId, $info, $kb);
+            editMessage($chatId, $messageId, $info, $kb);
         }
     }
-    // Сброс HWID администратором (неограниченно)
+    // Сброс HWID администратором
     elseif (strpos($data, 'adm_reset_') === 0 && $chatId === intval($adminId)) {
         $key = str_replace('adm_reset_', '', $data);
         if (isset($db['keys'][$key])) {
             $db['keys'][$key]['activations'] = [];
             saveDb();
-            sendMessage($chatId, "✅ Администратор сбросил HWID для ключа `$key`.");
+            tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '✅ HWID успешно сброшен!', 'show_alert' => true]);
+            
+            // Обновляем экран управления ключом
+            $d = $db['keys'][$key];
+            $usedCount = count($d['activations'] ?? []);
+            $maxLimit = $d['max'] ?? 1;
+            $timeStatus = formatRemainingTime($d['expires'], $d['first_use'], $d['duration'], !empty($d['is_frozen']));
+
+            $info = "👑 **Управление ключом (Админ)**\n\n🔑 Ключ: `$key` (HWID сброшен)\n📌 Остаток времени: $timeStatus\n👥 Устройства: {$usedCount}/{$maxLimit}\n👤 Владелец Telegram ID: `{$d['owner_tg']}`";
+            
+            $kb = [
+                'inline_keyboard' => [
+                    [['text' => '🔄 Сбросить HWID', 'callback_data' => 'adm_reset_' . $key]],
+                    [['text' => '⛔ В черный список (HWID/IP)', 'callback_data' => 'adm_ban_' . $key]],
+                    [['text' => '❌ Удалить ключ', 'callback_data' => 'adm_del_' . $key]],
+                    [['text' => '« К списку ключей', 'callback_data' => 'adm_list']]
+                ]
+            ];
+            editMessage($chatId, $messageId, $info, $kb);
         }
     }
-    // Добавление в черный список через ключ
+    // Бан через ключ в админке
     elseif (strpos($data, 'adm_ban_') === 0 && $chatId === intval($adminId)) {
         $key = str_replace('adm_ban_', '', $data);
         if (isset($db['keys'][$key])) {
@@ -528,15 +629,37 @@ if (isset($update['callback_query'])) {
             }
             unset($db['keys'][$key]);
             saveDb();
-            sendMessage($chatId, "⛔ Ключ удален, а все привязанные HWID/IP добавлены в черный список!");
+            tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '⛔ Ключ удален, HWID/IP заблокированы!', 'show_alert' => true]);
+            
+            // Возвращаем в список
+            $cq['data'] = 'adm_list';
+            // Перезапускаем логику списка
+            $inlineKeyboard = [];
+            foreach ($db['keys'] as $k => $d) {
+                $shortKey = substr($k, 0, 12) . "...";
+                $owner = $d['owner_tg'] ?? 0;
+                $inlineKeyboard[] = [['text' => "🔑 $shortKey (TG: $owner)", 'callback_data' => 'adm_manage_' . $k]];
+            }
+            $inlineKeyboard[] = [['text' => '« В админку', 'callback_data' => 'admin_panel']];
+            editMessage($chatId, $messageId, "📋 **Выберите ключ для администрирования:**", ['inline_keyboard' => $inlineKeyboard]);
         }
     }
+    // Удаление ключа в админке
     elseif (strpos($data, 'adm_del_') === 0 && $chatId === intval($adminId)) {
         $keyToDel = str_replace('adm_del_', '', $data);
         if (isset($db['keys'][$keyToDel])) {
             unset($db['keys'][$keyToDel]);
             saveDb();
-            sendMessage($chatId, "🗑 Ключ `$keyToDel` удален!");
+            tgRequest('answerCallbackQuery', ['callback_query_id' => $cq['id'], 'text' => '🗑 Ключ удален!', 'show_alert' => true]);
+            
+            $inlineKeyboard = [];
+            foreach ($db['keys'] as $k => $d) {
+                $shortKey = substr($k, 0, 12) . "...";
+                $owner = $d['owner_tg'] ?? 0;
+                $inlineKeyboard[] = [['text' => "🔑 $shortKey (TG: $owner)", 'callback_data' => 'adm_manage_' . $k]];
+            }
+            $inlineKeyboard[] = [['text' => '« В админку', 'callback_data' => 'admin_panel']];
+            editMessage($chatId, $messageId, "📋 **Выберите ключ для администрирования:**", ['inline_keyboard' => $inlineKeyboard]);
         }
     } 
     elseif ($data === 'back_home') {
@@ -553,7 +676,7 @@ if (isset($update['callback_query'])) {
         if ($chatId === intval($adminId)) {
             $keyboard['inline_keyboard'][] = [['text' => '👑 Админ-панель', 'callback_data' => 'admin_panel']];
         }
-        tgRequest('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "👋 Добро пожаловать в магазин **Lori Store**!\n\nВыберите тариф для покупки или управляйте своими ключами:", 'parse_mode' => 'Markdown', 'reply_markup' => $keyboard]);
+        editMessage($chatId, $messageId, "👋 Добро пожаловать в магазин **Lori Store**!\n\nВыберите тариф для покупки или управляйте своими ключами:", $keyboard);
     }
 }
 ?>
