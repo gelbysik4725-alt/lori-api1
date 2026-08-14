@@ -1,7 +1,7 @@
 <?php
 error_reporting(0);
 header('Content-Type: application/json; charset=utf-8');
-date_default_timezone_set('Europe/Moscow'); // Установка московского времени
+date_default_timezone_set('Europe/Moscow');
 
 // --- НАСТРОЙКИ ---
 $botToken = "8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo";
@@ -20,10 +20,13 @@ if (!isset($db['settings'])) {
     $db['settings'] = [
         "status" => "online", // online, maintenance, killswitch
         "version" => "1.0.0",
-        "checksum" => "918bb079bf65835b77ee4d684ee725752ddfbf72", // Ваш SHA1 хэш скрипта
+        "checksum" => "0c0dde7a53cf0f9857a121d41e4703bc44eef289", 
         "download_url" => "https://example.com/script.lua",
         "emergency_msg" => ""
     ];
+} else {
+    // Принудительно обновляем хэш в существующей базе
+    $db['settings']['checksum'] = "0c0dde7a53cf0f9857a121d41e4703bc44eef289";
 }
 
 function saveDb() {
@@ -39,7 +42,7 @@ function addLog($text) {
     saveDb();
 }
 
-// Очистка старых сессий онлайн (если не было пинга больше 60 секунд)
+// Очистка старых сессий онлайн (если нет пинга > 60 секунд)
 foreach ($db['online'] as $hwid => $data) {
     if (time() - $data['last_ping'] > 60) {
         unset($db['online'][$hwid]);
@@ -50,14 +53,14 @@ saveDb();
 $action = $_GET['action'] ?? '';
 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
-// --- 0. ПРОВЕРКА СТАТУСА, ВЕРСИИ И ЦЕЛОСТНОСТИ (FIXED) ---
+// --- 0. ПРОВЕРКА СТАТУСА, ВЕРСИИ И ЦЕЛОСТНОСТИ ---
 if ($action === "status_check") {
     $clientChecksum = $_POST['checksum'] ?? $_GET['checksum'] ?? '';
     $hwid = $_POST['hwid'] ?? $_GET['hwid'] ?? '';
     $key = $_POST['key'] ?? $_GET['key'] ?? '';
 
     // Проверка целостности файла скрипта
-    if (!empty($clientChecksum) && $clientChecksum !== $db['settings']['checksum']) {
+    if (!empty($clientChecksum) && strtolower($clientChecksum) !== strtolower($db['settings']['checksum'])) {
         echo json_encode([
             "status" => "error",
             "message" => "Обнаружена модификация скрипта! Доступ заблокирован."
@@ -65,7 +68,7 @@ if ($action === "status_check") {
         exit;
     }
 
-    // Экстренное отключение (Killswitch) — теперь возвращает корректный JSON для скрипта
+    // Экстренное отключение (Killswitch)
     if ($db['settings']['status'] === 'killswitch') {
         echo json_encode([
             "status" => "killswitch",
@@ -78,7 +81,7 @@ if ($action === "status_check") {
     if (!empty($hwid)) {
         $db['online'][$hwid] = [
             'ip' => $ip,
-            'key' => $key,
+            'key' => $key ?: 'Не указан',
             'last_ping' => time()
         ];
         saveDb();
@@ -109,7 +112,7 @@ if ($action === "check") {
     }
 
     if (empty($key)) {
-        echo json_encode(["status" => "error", "message" => "Укажите ключ!"]);
+        echo "Укажите ключ!";
         exit;
     }
 
@@ -168,7 +171,7 @@ if ($action === "check") {
         ];
         
         saveDb();
-        addLog("Ключ $key активирован на устройстве HWID: $hwid (IP: $ip)");
+        addLog("Ключ $key активирован на HWID: $hwid");
         echo "SUCCESS";
     } else {
         echo "Превышен лимит активаций для этого ключа!";
@@ -244,7 +247,6 @@ if (isset($update['message']['successful_payment'])) {
         "owner_tg" => $chatId,
         "reset_left" => 2,
         "freeze_left" => 2,
-        "freeze_reset_time" => time() + 604800,
         "is_frozen" => false
     ];
     saveDb();
@@ -259,7 +261,6 @@ if (isset($update['message'])) {
     $text = trim($update['message']['text']);
 
     if ($chatId === intval($adminId)) {
-        // Создание ключа: /gen [часы] [лимит]
         if (strpos($text, '/gen ') === 0) {
             $args = explode(" ", $text);
             $hours = intval($args[1] ?? 24);
@@ -283,7 +284,6 @@ if (isset($update['message'])) {
             exit;
         }
 
-        // Выдача ключа пользователю по Telegram ID: /give [tg_id] [часы] [лимит]
         if (strpos($text, '/give ') === 0) {
             $args = explode(" ", $text);
             $targetUser = intval($args[1] ?? 0);
@@ -303,24 +303,22 @@ if (isset($update['message'])) {
                     "owner_tg" => $targetUser,
                     "reset_left" => 2,
                     "freeze_left" => 2,
-                    "freeze_reset_time" => time() + 604800,
                     "is_frozen" => false
                 ];
                 saveDb();
                 sendMessage($chatId, "🎁 Ключ `$newKey` успешно выдан пользователю `$targetUser`!");
                 sendMessage($targetUser, "🎁 **Администратор выдал вам персональный ключ!**\n\nКлюч: `$newKey`\nПроверьте раздел «Мои ключи».");
             } else {
-                sendMessage($chatId, "❌ Неверный Telegram ID пользователя.");
+                sendMessage($chatId, "❌ Ошибка: неверный или пропущен Telegram ID.");
             }
             exit;
         }
 
-        // Рассылка / Экстренное уведомление в игру: /broadcast [текст]
         if (strpos($text, '/broadcast ') === 0) {
             $msgText = substr($text, 11);
             $db['settings']['emergency_msg'] = "🚨 [Уведомление]: " . $msgText;
             saveDb();
-            sendMessage($chatId, "✅ Экстренное сообщение установлено! Игроки увидят его при следующем запросе.");
+            sendMessage($chatId, "✅ Экстренное сообщение установлено для всех игроков!");
             exit;
         }
     }
@@ -373,7 +371,7 @@ if (isset($update['callback_query'])) {
             $maxLimit = $d['max'] ?? 1;
             
             if ($d['first_use'] == 0) {
-                $status = "⏳ Не активирован (срок пойдет после запуска)";
+                $status = "⏳ Не активирован";
             } else {
                 $remains = $d['expires'] - time();
                 if ($d['expires'] == 0) $status = "♾️ Бессрочный";
@@ -408,7 +406,6 @@ if (isset($update['callback_query'])) {
             }
         }
     }
-    // Админ-панель
     elseif ($data === 'admin_panel' && $chatId === intval($adminId)) {
         $totalKeys = count($db['keys']);
         $onlineCount = count($db['online']);
