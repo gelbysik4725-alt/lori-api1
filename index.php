@@ -1,6 +1,7 @@
 <?php
 error_reporting(0);
 header('Content-Type: application/json; charset=utf-8');
+date_default_timezone_set('Europe/Moscow'); // Установка московского времени
 
 // --- НАСТРОЙКИ ---
 $botToken = "8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo";
@@ -17,7 +18,7 @@ if (!isset($db['logs'])) $db['logs'] = [];
 if (!isset($db['online'])) $db['online'] = [];
 if (!isset($db['settings'])) {
     $db['settings'] = [
-        "status" => "online", // online, maintenance, update, killswitch
+        "status" => "online", // online, maintenance, killswitch
         "version" => "1.0.0",
         "checksum" => "918bb079bf65835b77ee4d684ee725752ddfbf72", // Ваш SHA1 хэш скрипта
         "download_url" => "https://example.com/script.lua",
@@ -49,7 +50,7 @@ saveDb();
 $action = $_GET['action'] ?? '';
 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
-// --- 0. ПРОВЕРКА СТАТУСА, ВЕРСИИ И ЦЕЛОСТНОСТИ (OTA & INTEGRITY) ---
+// --- 0. ПРОВЕРКА СТАТУСА, ВЕРСИИ И ЦЕЛОСТНОСТИ (FIXED) ---
 if ($action === "status_check") {
     $clientChecksum = $_POST['checksum'] ?? $_GET['checksum'] ?? '';
     $hwid = $_POST['hwid'] ?? $_GET['hwid'] ?? '';
@@ -64,11 +65,11 @@ if ($action === "status_check") {
         exit;
     }
 
-    // Экстренное отключение (Killswitch)
+    // Экстренное отключение (Killswitch) — теперь возвращает корректный JSON для скрипта
     if ($db['settings']['status'] === 'killswitch') {
         echo json_encode([
             "status" => "killswitch",
-            "message" => $db['settings']['emergency_msg'] ?: "Софт экстренно остановлен администратором!"
+            "message" => $db['settings']['emergency_msg'] ?: "🚨 Софт экстренно остановлен администратором!"
         ]);
         exit;
     }
@@ -258,6 +259,7 @@ if (isset($update['message'])) {
     $text = trim($update['message']['text']);
 
     if ($chatId === intval($adminId)) {
+        // Создание ключа: /gen [часы] [лимит]
         if (strpos($text, '/gen ') === 0) {
             $args = explode(" ", $text);
             $hours = intval($args[1] ?? 24);
@@ -281,18 +283,44 @@ if (isset($update['message'])) {
             exit;
         }
 
+        // Выдача ключа пользователю по Telegram ID: /give [tg_id] [часы] [лимит]
+        if (strpos($text, '/give ') === 0) {
+            $args = explode(" ", $text);
+            $targetUser = intval($args[1] ?? 0);
+            $hours = intval($args[2] ?? 24);
+            $maxLimit = intval($args[3] ?? 1);
+            
+            if ($targetUser > 0) {
+                $duration = ($hours == 0) ? 0 : ($hours * 3600);
+                $newKey = "LORI-GIFT-" . strtoupper(substr(md5(rand() . time()), 0, 8));
+                
+                $db['keys'][$newKey] = [
+                    "duration" => $duration,
+                    "expires" => 0,
+                    "first_use" => 0,
+                    "max" => $maxLimit,
+                    "activations" => [],
+                    "owner_tg" => $targetUser,
+                    "reset_left" => 2,
+                    "freeze_left" => 2,
+                    "freeze_reset_time" => time() + 604800,
+                    "is_frozen" => false
+                ];
+                saveDb();
+                sendMessage($chatId, "🎁 Ключ `$newKey` успешно выдан пользователю `$targetUser`!");
+                sendMessage($targetUser, "🎁 **Администратор выдал вам персональный ключ!**\n\nКлюч: `$newKey`\nПроверьте раздел «Мои ключи».");
+            } else {
+                sendMessage($chatId, "❌ Неверный Telegram ID пользователя.");
+            }
+            exit;
+        }
+
+        // Рассылка / Экстренное уведомление в игру: /broadcast [текст]
         if (strpos($text, '/broadcast ') === 0) {
             $msgText = substr($text, 11);
-            $usersToNotify = [];
-            foreach ($db['keys'] as $k => $kd) {
-                if (!empty($kd['owner_tg'])) $usersToNotify[$kd['owner_tg']] = true;
-            }
-            $count = 0;
-            foreach ($usersToNotify as $uId => $val) {
-                sendMessage($uId, "📢 **Рассылка от администрации:**\n\n$msgText");
-                $count++;
-            }
-            sendMessage($chatId, "✅ Рассылка отправлена $count пользователям.");
+            $db['settings']['emergency_msg'] = "🚨 [Уведомление]: " . $msgText;
+            saveDb();
+            sendMessage($chatId, "✅ Экстренное сообщение установлено! Игроки увидят его при следующем запросе.");
             exit;
         }
     }
@@ -345,21 +373,18 @@ if (isset($update['callback_query'])) {
             $maxLimit = $d['max'] ?? 1;
             
             if ($d['first_use'] == 0) {
-                $status = "⏳ Не активирован";
+                $status = "⏳ Не активирован (срок пойдет после запуска)";
             } else {
                 $remains = $d['expires'] - time();
                 if ($d['expires'] == 0) $status = "♾️ Бессрочный";
                 elseif ($remains > 0) {
                     $days = floor($remains / 86400);
                     $hours = floor(($remains % 86400) / 3600);
-                    $status = "🟢 Активен (осталось {$days}д {$hours}ч)";
+                    $status = "🟢 Активен (осталось {$days}д {$hours}ч до " . date("d.m.Y H:i", $d['expires']) . " МСК)";
                 } else $status = "🔴 Истек";
             }
 
             $info = "🔑 Ключ: `$k`\n📌 Статус: $status\n👥 Устройства: {$usedCount}/{$maxLimit}\n";
-            foreach($d['activations'] as $act) {
-                $info .= "└ HWID: `{$act['hwid']}` | IP: `{$act['ip']}`\n";
-            }
 
             $kb = [
                 'inline_keyboard' => [
@@ -391,7 +416,7 @@ if (isset($update['callback_query'])) {
 
         $text = "👑 **Панель администратора**\n\n";
         $text .= "📊 Всего ключей: $totalKeys\n";
-        $text .= "🟢 Онлайн игроков прямо сейчас: **$onlineCount**\n";
+        $text .= "🟢 Онлайн игроков: **$onlineCount**\n";
         $text .= "⚙️ Статус софта: `$statusSoft`\n";
 
         $keyboard = [
@@ -399,13 +424,12 @@ if (isset($update['callback_query'])) {
                 [['text' => '🟢 Кто в сети (Онлайн)', 'callback_data' => 'adm_online']],
                 [['text' => '📋 Список всех пользователей и ключей', 'callback_data' => 'adm_users_list']],
                 [['text' => '🚨 Экстренное закрытие софта (Killswitch)', 'callback_data' => 'toggle_killswitch']],
-                [['text' => '⚙️ Управление статусом (Online/Maint)', 'callback_data' => 'toggle_status']],
+                [['text' => '⚙️ Управление статусом', 'callback_data' => 'toggle_status']],
                 [['text' => '📜 Логи', 'callback_data' => 'adm_logs']]
             ]
         ];
         tgRequest('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'Markdown', 'reply_markup' => $keyboard]);
     }
-    // Просмотр кто в сети
     elseif ($data === 'adm_online' && $chatId === intval($adminId)) {
         $text = "🟢 **Игроки в сети прямо сейчас:**\n\n";
         if (empty($db['online'])) {
@@ -418,26 +442,24 @@ if (isset($update['callback_query'])) {
         $kb = ['inline_keyboard' => [[['text' => '« В админку', 'callback_data' => 'admin_panel']]]];
         sendMessage($chatId, $text, $kb);
     }
-    // Полный список пользователей, ключей, айпи и хвидов
     elseif ($data === 'adm_users_list' && $chatId === intval($adminId)) {
-        $text = "📋 **База данных пользователей и ключей:**\n\n";
+        $text = "📋 **База данных ключей (МСК):**\n\n";
         foreach ($db['keys'] as $key => $kData) {
-            $owner = $kData['owner_tg'] ? "TG ID: {$kData['owner_tg']}" : "Админский/Магазин";
-            $text .= "🔑 **$key** ($owner)\n";
-            $text .= "⏰ Истекает: " . ($kData['expires'] == 0 ? "Навсегда" : date("d.m.Y H:i", $kData['expires'])) . "\n";
+            $owner = $kData['owner_tg'] ? "Владелец TG ID: {$kData['owner_tg']}" : "Админ / Магазин";
+            $expDate = ($kData['expires'] == 0) ? "Навсегда" : date("d.m.Y H:i", $kData['expires']) . " МСК";
+            if ($kData['first_use'] == 0 && $kData['duration'] > 0) $expDate = "Не активирован";
+            
+            $text .= "🔑 **$key**\n👤 $owner\n⏰ Истекает: $expDate\n";
             if (!empty($kData['activations'])) {
                 foreach ($kData['activations'] as $act) {
                     $text .= "   └ IP: `{$act['ip']}` | HWID: `{$act['hwid']}`\n";
                 }
-            } else {
-                $text .= "   └ Активаций еще нет\n";
             }
             $text .= "-----------------------------------\n";
         }
         $kb = ['inline_keyboard' => [[['text' => '« В админку', 'callback_data' => 'admin_panel']]]];
         sendMessage($chatId, $text, $kb);
     }
-    // Переключатель Killswitch (Экстренное закрытие у всех)
     elseif ($data === 'toggle_killswitch' && $chatId === intval($adminId)) {
         if ($db['settings']['status'] === 'killswitch') {
             $db['settings']['status'] = 'online';
@@ -448,7 +470,7 @@ if (isset($update['callback_query'])) {
             $db['settings']['status'] = 'killswitch';
             $db['settings']['emergency_msg'] = '🚨 ВНИМАНИЕ: Софт был экстренно остановлен администратором!';
             saveDb();
-            sendMessage($chatId, "🚨 **Killswitch активирован!** Все активные копии скрипта закроются.");
+            sendMessage($chatId, "🚨 **Killswitch активирован!**");
         }
     }
     elseif ($data === 'toggle_status' && $chatId === intval($adminId)) {
