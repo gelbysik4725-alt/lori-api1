@@ -20,13 +20,13 @@ if (!isset($db['settings'])) {
     $db['settings'] = [
         "status" => "online", // online, maintenance, killswitch
         "version" => "1.0.0",
-        "checksum" => "0c0dde7a53cf0f9857a121d41e4703bc44eef289", 
+        "checksum" => "5c8714cf5eb4010c2cad5b14ac476f3f3f695d26", 
         "download_url" => "https://example.com/script.lua",
         "emergency_msg" => ""
     ];
 } else {
     // Принудительно обновляем хэш в существующей базе
-    $db['settings']['checksum'] = "0c0dde7a53cf0f9857a121d41e4703bc44eef289";
+    $db['settings']['checksum'] = "5c8714cf5eb4010c2cad5b14ac476f3f3f695d26";
 }
 
 function saveDb() {
