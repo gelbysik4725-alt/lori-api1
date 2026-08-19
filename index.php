@@ -14,8 +14,8 @@ error_reporting(0);
 date_default_timezone_set('Europe/Moscow');
 
 // ====================== НАСТРОЙКИ ======================
-$botToken   = getenv('BOT_TOKEN') ?: '';
-$adminId    = (int)(getenv('ADMIN_ID') ?: 0);
+$botToken   = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo';
+$adminId    = (int)(getenv('ADMIN_ID') ?: 8875180956);
 $adminPass  = getenv('ADMIN_PASS') ?: 'admin123'; // пароль для веб-админки
 
 if (empty($botToken) || empty($adminId)) {
