@@ -1,0 +1,13 @@
+{
+  "keys": {},
+  "blacklist": {},
+  "logs": [],
+  "online": {},
+  "settings": {
+    "status": "online",
+    "version": "1.0.0",
+    "checksum": "5c8714cf5eb4010c2cad5b14ac476f3f3f695d26",
+    "download_url": "https://example.com/script.lua",
+    "emergency_msg": ""
+  }
+}
