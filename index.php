@@ -23,7 +23,7 @@ $adminPass = getenv('ADMIN_PASS') ?: 'admin123';
 
 if (empty($botToken) || empty($adminId)) {
     http_response_code(500);
-    die('Server misconfigured. Set BOT_TOKEN and ADMIN_ID in Render Environment');
+    die('Server misconfigured. Set BOT_TOKEN and ADMIN_ID');
 }
 
 $dbFile = __DIR__ . '/database.json';
@@ -35,14 +35,14 @@ foreach (['keys', 'blacklist', 'logs', 'online'] as $k) {
 }
 if (!isset($db['settings'])) {
     $db['settings'] = [
-        'status'        => 'online',          // online | maintenance | killswitch
-        'soft_status'   => 'undetected',      // undetected | updating | detected
+        'status'        => 'online',
+        'soft_status'   => 'undetected',
         'global_freeze' => false,
-        'version'       => '1.3.0',
+        'version'       => '1.5.0',
         'checksum'      => '5c8714cf5eb4010c2cad5b14ac476f3f3f695d26',
         'download_url'  => 'https://example.com/script.lua',
         'emergency_msg' => '',
-        'broadcast'     => '',                // сообщение, которое видят все онлайн
+        'broadcast'     => '',
         'prices' => [
             'day'   => ['stars' => 25,  'rub' => 49],
             'week'  => ['stars' => 75,  'rub' => 149],
@@ -50,6 +50,16 @@ if (!isset($db['settings'])) {
             'life'  => ['stars' => 400, 'rub' => 799]
         ]
     ];
+}
+
+function getPrefixByLevel($level) {
+    $map = [
+        'trial'   => 'TRIAL',
+        'free'    => 'FREE',
+        'media'   => 'MEDIA',
+        'premium' => 'PREMIUM'
+    ];
+    return $map[$level] ?? 'LORI';
 }
 
 function saveDb() {
@@ -63,11 +73,8 @@ function addLog($text) {
     saveDb();
 }
 
-// Чистка онлайн (больше 2 минут без пинга)
 foreach ($db['online'] as $hwid => $data) {
-    if (time() - ($data['last_ping'] ?? 0) > 120) {
-        unset($db['online'][$hwid]);
-    }
+    if (time() - ($data['last_ping'] ?? 0) > 120) unset($db['online'][$hwid]);
 }
 saveDb();
 
@@ -85,38 +92,25 @@ if ($action === 'status_check') {
         echo json_encode(['status' => 'error', 'message' => 'Обнаружена модификация скрипта!']);
         exit;
     }
-
     if ($db['settings']['status'] === 'killswitch') {
-        echo json_encode([
-            'status'  => 'killswitch',
-            'message' => $db['settings']['emergency_msg'] ?: 'Софт экстренно остановлен!'
-        ]);
+        echo json_encode(['status' => 'killswitch', 'message' => $db['settings']['emergency_msg'] ?: 'Софт экстренно остановлен!']);
         exit;
     }
-
     if (!empty($db['settings']['global_freeze'])) {
-        echo json_encode([
-            'status'  => 'frozen',
-            'message' => 'Все ключи временно заморожены (обновление)'
-        ]);
+        echo json_encode(['status' => 'frozen', 'message' => 'Все ключи временно заморожены']);
         exit;
     }
-
     if (($db['settings']['soft_status'] ?? '') === 'detected') {
-        echo json_encode([
-            'status'  => 'detected',
-            'message' => 'Софт временно недоступен (Detected)'
-        ]);
+        echo json_encode(['status' => 'detected', 'message' => 'Софт временно недоступен (Detected)']);
         exit;
     }
 
-    // Обновляем онлайн
     if (!empty($hwid)) {
         $db['online'][$hwid] = [
-            'ip'        => $ip,
-            'key'       => $key ?: '—',
-            'last_ping' => time(),
-            'first_seen'=> $db['online'][$hwid]['first_seen'] ?? time()
+            'ip'         => $ip,
+            'key'        => $key ?: '—',
+            'last_ping'  => time(),
+            'first_seen' => $db['online'][$hwid]['first_seen'] ?? time()
         ];
         saveDb();
     }
@@ -159,10 +153,7 @@ if ($action === 'check') {
     $kd  = $db['keys'][$key];
     $now = time();
 
-    if (!empty($kd['is_frozen'])) {
-        echo 'Ключ заморожен!';
-        exit;
-    }
+    if (!empty($kd['is_frozen'])) { echo 'Ключ заморожен!'; exit; }
     if (($kd['expires'] ?? 0) !== 0 && $now > $kd['expires']) {
         unset($db['keys'][$key]);
         saveDb();
@@ -173,7 +164,7 @@ if ($action === 'check') {
     $acts = $kd['activations'] ?? [];
     $max  = (int)($kd['max'] ?? 1);
 
-    // Уже привязан этот HWID?
+    // Уже есть этот HWID на этом ключе
     foreach ($acts as &$a) {
         if (($a['hwid'] ?? '') === $hwid) {
             $a['ip']          = $ip;
@@ -186,7 +177,7 @@ if ($action === 'check') {
     }
     unset($a);
 
-    // Новый HWID
+    // Новый HWID (можно на бесконечное число ключей, лимит только max на этом ключе)
     if (count($acts) < $max) {
         if (($kd['first_use'] ?? 0) == 0) {
             $db['keys'][$key]['first_use'] = $now;
@@ -202,7 +193,7 @@ if ($action === 'check') {
             'launches'    => 1
         ];
         saveDb();
-        addLog("Ключ $key активирован | HWID: " . substr($hwid, 0, 16) . "... | IP: $ip");
+        addLog("Ключ $key активирован | HWID: " . substr($hwid, 0, 12) . "... | IP: $ip");
         echo 'SUCCESS';
     } else {
         echo 'Превышен лимит устройств!';
@@ -242,7 +233,6 @@ if (isset($_GET['admin'])) {
             .err{color:#ff6b9d;margin-bottom:10px}
         </style></head><body><div class="box">
         <h2 style="color:#ff69b4;margin:0 0 8px">Lori Admin</h2>
-        <p style="color:#c4a0b0;font-size:0.9rem;margin-bottom:12px">Панель управления</p>
         ' . (!empty($loginError) ? '<div class="err">'.$loginError.'</div>' : '') . '
         <form method="post"><input type="password" name="password" placeholder="Пароль" required autofocus>
         <button type="submit">Войти</button></form></div></body></html>';
@@ -251,48 +241,38 @@ if (isset($_GET['admin'])) {
 
     $msg = '';
     $tab = $_GET['tab'] ?? 'dashboard';
+    $viewKey = $_GET['view'] ?? '';
 
-    // ===== ОБРАБОТКА ДЕЙСТВИЙ =====
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $act = $_POST['action'];
 
-        // Одиночная генерация
         if ($act === 'gen_key') {
             $hours  = (int)($_POST['hours'] ?? 24);
             $max    = max(1, (int)($_POST['max'] ?? 1));
-            $level  = $_POST['level'] ?? 'legit';
-            $prefix = preg_replace('/[^A-Za-z0-9\-]/', '', $_POST['prefix'] ?? 'LORI');
+            $level  = in_array($_POST['level'] ?? '', ['trial','free','media','premium']) ? $_POST['level'] : 'trial';
+            $prefix = getPrefixByLevel($level);
             $duration = $hours === 0 ? 0 : $hours * 3600;
-            $newKey = strtoupper($prefix) . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
+            $newKey = $prefix . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
             $db['keys'][$newKey] = [
-                'duration'    => $duration,
-                'expires'     => 0,
-                'first_use'   => 0,
-                'max'         => $max,
-                'activations' => [],
-                'owner_tg'    => 0,
-                'owner_name'  => '',
-                'reset_left'  => 3,
-                'is_frozen'   => false,
-                'level'       => $level,
-                'created'     => time()
+                'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $max,
+                'activations' => [], 'owner_tg' => 0, 'owner_name' => '', 'reset_left' => 3,
+                'is_frozen' => false, 'level' => $level, 'created' => time()
             ];
             saveDb();
-            addLog("Создан ключ $newKey ($level)");
-            $msg = "✅ Ключ создан: <b>$newKey</b>";
+            addLog("Создан $newKey ($level)");
+            $msg = "✅ Ключ: <b>$newKey</b>";
         }
 
-        // Массовая генерация
         if ($act === 'bulk_generate') {
             $count  = max(1, min(100, (int)($_POST['count'] ?? 10)));
             $hours  = (int)($_POST['hours'] ?? 24);
             $max    = max(1, (int)($_POST['max'] ?? 1));
-            $level  = $_POST['level'] ?? 'legit';
-            $prefix = preg_replace('/[^A-Za-z0-9\-]/', '', $_POST['prefix'] ?? 'LORI');
+            $level  = in_array($_POST['level'] ?? '', ['trial','free','media','premium']) ? $_POST['level'] : 'trial';
+            $prefix = getPrefixByLevel($level);
             $duration = $hours === 0 ? 0 : $hours * 3600;
             $list = [];
             for ($i = 0; $i < $count; $i++) {
-                $newKey = strtoupper($prefix) . '-' . strtoupper(substr(md5(uniqid(mt_rand() . $i, true)), 0, 8));
+                $newKey = $prefix . '-' . strtoupper(substr(md5(uniqid(mt_rand() . $i, true)), 0, 8));
                 $db['keys'][$newKey] = [
                     'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $max,
                     'activations' => [], 'owner_tg' => 0, 'owner_name' => '', 'reset_left' => 2,
@@ -301,47 +281,42 @@ if (isset($_GET['admin'])) {
                 $list[] = $newKey;
             }
             saveDb();
-            addLog("Bulk: создано $count ключей ($level)");
-            $msg = "✅ Создано <b>$count</b> ключей:<br><code style='font-size:0.8rem'>" . implode('<br>', $list) . "</code>";
+            addLog("Bulk: $count ключей ($level)");
+            $msg = "✅ Создано <b>$count</b>:<br><code style='font-size:0.8rem'>" . implode('<br>', $list) . "</code>";
         }
 
-        // Выдать по Telegram ID
         if ($act === 'give_key') {
             $tgId  = (int)($_POST['tg_id'] ?? 0);
             $hours = (int)($_POST['hours'] ?? 24);
             $max   = max(1, (int)($_POST['max'] ?? 1));
-            $level = $_POST['level'] ?? 'legit';
+            $level = in_array($_POST['level'] ?? '', ['trial','free','media','premium']) ? $_POST['level'] : 'premium';
             if ($tgId > 0) {
+                $prefix = getPrefixByLevel($level);
                 $duration = $hours === 0 ? 0 : $hours * 3600;
-                $newKey = 'LORI-GIFT-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
+                $newKey = $prefix . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
                 $db['keys'][$newKey] = [
                     'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $max,
                     'activations' => [], 'owner_tg' => $tgId, 'owner_name' => '', 'reset_left' => 3,
                     'is_frozen' => false, 'level' => $level, 'created' => time()
                 ];
                 saveDb();
-                addLog("Выдан $newKey → TG $tgId");
-                // Отправляем пользователю
+                addLog("Выдан $newKey → $tgId");
                 $opts = ['http' => ['header' => "Content-Type: application/json\r\n", 'method' => 'POST',
-                    'content' => json_encode(['chat_id' => $tgId, 'text' => "🎁 Вам выдан ключ:\n`$newKey`\nУровень: $level", 'parse_mode' => 'Markdown'], JSON_UNESCAPED_UNICODE)]];
+                    'content' => json_encode(['chat_id' => $tgId, 'text' => "🎁 Вам выдан ключ:\n`$newKey`\nТип: $level", 'parse_mode' => 'Markdown'], JSON_UNESCAPED_UNICODE)]];
                 @file_get_contents("https://api.telegram.org/bot$botToken/sendMessage", false, stream_context_create($opts));
-                $msg = "✅ Ключ <b>$newKey</b> выдан пользователю <b>$tgId</b>";
-            } else {
-                $msg = "❌ Укажите корректный Telegram ID";
-            }
+                $msg = "✅ <b>$newKey</b> → <b>$tgId</b>";
+            } else $msg = "❌ Укажите Telegram ID";
         }
 
-        // Заморозка одного ключа
         if ($act === 'freeze_key' && !empty($_POST['key'])) {
             $k = $_POST['key'];
             if (isset($db['keys'][$k])) {
                 $db['keys'][$k]['is_frozen'] = empty($db['keys'][$k]['is_frozen']);
                 saveDb();
-                $msg = !empty($db['keys'][$k]['is_frozen']) ? "❄️ Ключ заморожен" : "🔓 Ключ разморожен";
+                $msg = !empty($db['keys'][$k]['is_frozen']) ? "❄️ Заморожен" : "🔓 Разморожен";
             }
         }
 
-        // Сброс HWID
         if ($act === 'reset_hwid' && !empty($_POST['key'])) {
             $k = $_POST['key'];
             if (isset($db['keys'][$k])) {
@@ -352,21 +327,18 @@ if (isset($_GET['admin'])) {
             }
         }
 
-        // Удаление ключа
         if ($act === 'delete_key' && !empty($_POST['key'])) {
             unset($db['keys'][$_POST['key']]);
             saveDb();
-            $msg = "🗑 Ключ удалён";
+            $msg = "🗑 Удалён";
         }
 
-        // Глобальная заморозка
         if ($act === 'toggle_global_freeze') {
             $db['settings']['global_freeze'] = empty($db['settings']['global_freeze']);
             saveDb();
-            $msg = !empty($db['settings']['global_freeze']) ? '❄️ Глобальная заморозка ВКЛ' : '🔓 Глобальная заморозка ВЫКЛ';
+            $msg = !empty($db['settings']['global_freeze']) ? '❄️ Global freeze ВКЛ' : '🔓 Global freeze ВЫКЛ';
         }
 
-        // Статус / Killswitch / Soft status
         if ($act === 'set_status') {
             $db['settings']['status'] = $_POST['status'] ?? 'online';
             if ($db['settings']['status'] !== 'killswitch') $db['settings']['emergency_msg'] = '';
@@ -376,24 +348,20 @@ if (isset($_GET['admin'])) {
         if ($act === 'set_soft_status') {
             $db['settings']['soft_status'] = $_POST['soft_status'] ?? 'undetected';
             saveDb();
-            $msg = "Soft status: " . $db['settings']['soft_status'];
+            $msg = "Soft: " . $db['settings']['soft_status'];
         }
-
-        // Broadcast (сообщение всем онлайн)
         if ($act === 'set_broadcast') {
             $db['settings']['broadcast'] = trim($_POST['broadcast'] ?? '');
             saveDb();
-            $msg = $db['settings']['broadcast'] !== '' ? '📢 Broadcast установлен' : '📢 Broadcast очищен';
+            $msg = $db['settings']['broadcast'] !== '' ? '📢 Broadcast OK' : '📢 Broadcast очищен';
         }
-
-        // Чёрный список
         if ($act === 'add_blacklist') {
             $val = trim($_POST['value'] ?? '');
             if ($val !== '') {
                 $db['blacklist'][$val] = ['time' => time(), 'reason' => trim($_POST['reason'] ?? '')];
                 saveDb();
                 addLog("В ЧС: $val");
-                $msg = "🚫 Добавлено в ЧС: $val";
+                $msg = "🚫 В ЧС: $val";
             }
         }
         if ($act === 'remove_blacklist' && !empty($_POST['value'])) {
@@ -401,20 +369,17 @@ if (isset($_GET['admin'])) {
             saveDb();
             $msg = "✅ Удалено из ЧС";
         }
-
-        // Настройки
         if ($act === 'save_settings') {
-            $db['settings']['version']      = trim($_POST['version'] ?? $db['settings']['version']);
-            $db['settings']['checksum']     = trim($_POST['checksum'] ?? $db['settings']['checksum']);
-            $db['settings']['download_url'] = trim($_POST['download_url'] ?? $db['settings']['download_url']);
-            $db['settings']['emergency_msg']= trim($_POST['emergency_msg'] ?? '');
+            $db['settings']['version']       = trim($_POST['version'] ?? $db['settings']['version']);
+            $db['settings']['checksum']      = trim($_POST['checksum'] ?? $db['settings']['checksum']);
+            $db['settings']['download_url']  = trim($_POST['download_url'] ?? $db['settings']['download_url']);
+            $db['settings']['emergency_msg'] = trim($_POST['emergency_msg'] ?? '');
             saveDb();
-            $msg = "⚙️ Настройки сохранены";
+            $msg = "⚙️ Сохранено";
         }
     }
 
-    // Статистика
-    $totalKeys = count($db['keys']);
+    $totalKeys   = count($db['keys']);
     $onlineCount = count($db['online']);
     $active = $frozen = $expired = 0;
     foreach ($db['keys'] as $kd) {
@@ -439,17 +404,17 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .header h1{font-size:1.25rem;color:var(--pink)}
 .header a{color:var(--muted);text-decoration:none;margin-left:14px;font-size:0.88rem}
 .layout{display:flex;max-width:1400px;margin:0 auto}
-.sidebar{width:210px;padding:16px 10px;border-right:1px solid var(--border);min-height:calc(100vh - 55px)}
+.sidebar{width:200px;padding:16px 10px;border-right:1px solid var(--border);min-height:calc(100vh - 55px)}
 .sidebar a{display:block;padding:10px 12px;border-radius:10px;color:var(--muted);text-decoration:none;margin-bottom:3px;font-size:0.9rem}
 .sidebar a:hover,.sidebar a.active{background:rgba(255,105,180,0.12);color:var(--pink)}
 .content{flex:1;padding:20px 16px}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px}
 .stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center}
-.stat .num{font-size:1.5rem;font-weight:700;color:var(--pink)}
-.stat .label{font-size:0.78rem;color:var(--muted);margin-top:2px}
+.stat .num{font-size:1.45rem;font-weight:700;color:var(--pink)}
+.stat .label{font-size:0.75rem;color:var(--muted);margin-top:2px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px}
 .card h2{font-size:1.05rem;color:var(--pink);margin-bottom:12px}
-.btn{display:inline-block;padding:8px 14px;border-radius:9px;border:none;font-weight:600;cursor:pointer;font-size:0.85rem;color:#fff}
+.btn{display:inline-block;padding:8px 14px;border-radius:9px;border:none;font-weight:600;cursor:pointer;font-size:0.85rem;color:#fff;text-decoration:none}
 .btn-pink{background:linear-gradient(90deg,var(--pink),var(--pink2))}
 .btn-dark{background:#2a1520;border:1px solid var(--border)}
 .btn-red{background:#c2185b}
@@ -468,8 +433,8 @@ th{color:var(--pink);font-weight:600}
 .badge-blue{background:rgba(59,130,246,0.15);color:#60a5fa}
 .badge-purple{background:rgba(168,85,247,0.15);color:#c084fc}
 .msg{background:rgba(255,105,180,0.12);border:1px solid var(--pink);padding:11px 14px;border-radius:11px;margin-bottom:16px;color:#ffb6d9;font-size:0.9rem}
-details{margin-top:6px}
-details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
+a.keylink{color:#ff9ec7;text-decoration:none}
+a.keylink:hover{text-decoration:underline}
 @media(max-width:800px){.layout{flex-direction:column}.sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);display:flex;overflow-x:auto;gap:4px;padding:8px}.sidebar a{white-space:nowrap;margin:0}}
 </style>
 </head>
@@ -497,76 +462,116 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
   <div class="content">
     <?php if ($msg): ?><div class="msg"><?= $msg ?></div><?php endif; ?>
 
-    <?php if ($tab === 'dashboard'): ?>
+    <?php if ($viewKey && isset($db['keys'][$viewKey])): 
+      $kd = $db['keys'][$viewKey];
+      $used = count($kd['activations'] ?? []);
+    ?>
+      <div class="card">
+        <h2>Ключ: <?= htmlspecialchars($viewKey) ?></h2>
+        <p>
+          Уровень: <b><?= htmlspecialchars($kd['level'] ?? '—') ?></b><br>
+          Владелец TG: <b><?= $kd['owner_tg'] ?: '—' ?></b><br>
+          Устройств: <?= $used ?>/<?= $kd['max'] ?? 1 ?><br>
+          Создан: <?= !empty($kd['created']) ? date('d.m.Y H:i', $kd['created']) : '—' ?><br>
+          Первая активация: <?= !empty($kd['first_use']) ? date('d.m.Y H:i', $kd['first_use']) : 'ещё нет' ?><br>
+          Истекает: <?= ($kd['expires'] ?? 0) == 0 ? 'навсегда' : date('d.m.Y H:i', $kd['expires']) ?><br>
+          Заморожен: <?= !empty($kd['is_frozen']) ? 'да' : 'нет' ?>
+        </p>
+        <h3 style="margin:14px 0 8px;color:var(--pink)">Активации / HWID</h3>
+        <?php if (empty($kd['activations'])): ?>
+          <p style="color:var(--muted)">Нет активаций</p>
+        <?php else: ?>
+          <table>
+            <tr><th>HWID</th><th>IP</th><th>Активация</th><th>Последний</th><th>Запусков</th></tr>
+            <?php foreach ($kd['activations'] as $a): ?>
+            <tr>
+              <td><code style="font-size:0.75rem"><?= htmlspecialchars($a['hwid'] ?? '') ?></code></td>
+              <td><?= htmlspecialchars($a['ip'] ?? '') ?></td>
+              <td><?= !empty($a['time']) ? date('d.m H:i', $a['time']) : '—' ?></td>
+              <td><?= !empty($a['last_active']) ? date('d.m H:i', $a['last_active']) : '—' ?></td>
+              <td><?= $a['launches'] ?? 1 ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </table>
+        <?php endif; ?>
+        <div style="margin-top:14px" class="form-row">
+          <form method="post"><input type="hidden" name="action" value="reset_hwid"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>"><button class="btn btn-dark" type="submit">Сброс HWID</button></form>
+          <form method="post"><input type="hidden" name="action" value="freeze_key"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>"><button class="btn btn-dark" type="submit"><?= !empty($kd['is_frozen'])?'Разморозить':'Заморозить' ?></button></form>
+          <form method="post" onsubmit="return confirm('Удалить?')"><input type="hidden" name="action" value="delete_key"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>"><button class="btn btn-red" type="submit">Удалить</button></form>
+          <a href="?admin&tab=keys" class="btn btn-dark">← Назад</a>
+        </div>
+      </div>
+
+    <?php elseif ($tab === 'dashboard'): ?>
       <div class="stats">
-        <div class="stat"><div class="num"><?= $totalKeys ?></div><div class="label">Всего ключей</div></div>
+        <div class="stat"><div class="num"><?= $totalKeys ?></div><div class="label">Ключей</div></div>
         <div class="stat"><div class="num"><?= $active ?></div><div class="label">Активных</div></div>
         <div class="stat"><div class="num"><?= $onlineCount ?></div><div class="label">Онлайн</div></div>
         <div class="stat"><div class="num"><?= $frozen ?></div><div class="label">Заморожено</div></div>
         <div class="stat"><div class="num"><?= $expired ?></div><div class="label">Истекло</div></div>
-        <div class="stat"><div class="num"><?= count($db['blacklist']) ?></div><div class="label">В ЧС</div></div>
+        <div class="stat"><div class="num"><?= count($db['blacklist']) ?></div><div class="label">ЧС</div></div>
       </div>
       <div class="card">
         <h2>Быстрые действия</h2>
         <div class="form-row">
-          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="online"><button class="btn btn-green" type="submit">🟢 Online</button></form>
-          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="maintenance"><button class="btn btn-dark" type="submit">🟡 Maintenance</button></form>
-          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="killswitch"><button class="btn btn-red" type="submit">🔴 Killswitch</button></form>
-          <form method="post"><input type="hidden" name="action" value="toggle_global_freeze"><button class="btn btn-dark" type="submit"><?= !empty($db['settings']['global_freeze']) ? '🔓 Снять глобальную заморозку' : '❄️ Глобальная заморозка' ?></button></form>
+          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="online"><button class="btn btn-green" type="submit">Online</button></form>
+          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="maintenance"><button class="btn btn-dark" type="submit">Maintenance</button></form>
+          <form method="post"><input type="hidden" name="action" value="set_status"><input type="hidden" name="status" value="killswitch"><button class="btn btn-red" type="submit">Killswitch</button></form>
+          <form method="post"><input type="hidden" name="action" value="toggle_global_freeze"><button class="btn btn-dark" type="submit"><?= !empty($db['settings']['global_freeze'])?'Снять freeze':'Global freeze' ?></button></form>
         </div>
-        <div class="form-row" style="margin-top:10px">
+        <div class="form-row">
           <form method="post"><input type="hidden" name="action" value="set_soft_status"><input type="hidden" name="soft_status" value="undetected"><button class="btn btn-green btn-sm" type="submit">Undetected</button></form>
           <form method="post"><input type="hidden" name="action" value="set_soft_status"><input type="hidden" name="soft_status" value="updating"><button class="btn btn-dark btn-sm" type="submit">Updating</button></form>
           <form method="post"><input type="hidden" name="action" value="set_soft_status"><input type="hidden" name="soft_status" value="detected"><button class="btn btn-red btn-sm" type="submit">Detected</button></form>
         </div>
-        <p style="margin-top:12px;color:var(--muted);font-size:0.88rem">
+        <p style="margin-top:10px;color:var(--muted);font-size:0.88rem">
           Статус: <b style="color:var(--pink)"><?= htmlspecialchars($db['settings']['status']) ?></b> ·
-          Soft: <b style="color:var(--pink)"><?= htmlspecialchars($db['settings']['soft_status'] ?? 'undetected') ?></b> ·
-          Global freeze: <b><?= !empty($db['settings']['global_freeze']) ? 'ДА' : 'нет' ?></b>
+          Soft: <b><?= htmlspecialchars($db['settings']['soft_status']??'undetected') ?></b> ·
+          Freeze: <b><?= !empty($db['settings']['global_freeze'])?'ДА':'нет' ?></b>
         </p>
       </div>
 
     <?php elseif ($tab === 'generate'): ?>
       <div class="card">
-        <h2>Создать один ключ</h2>
+        <h2>Создать ключ</h2>
         <form method="post">
           <input type="hidden" name="action" value="gen_key">
           <div class="form-row">
-            <input type="number" name="hours" value="24" placeholder="Часов (0=навсегда)" style="width:140px">
-            <input type="number" name="max" value="1" min="1" placeholder="Устройств" style="width:90px">
+            <input type="number" name="hours" value="24" placeholder="Часов (0=∞)" style="width:130px">
+            <input type="number" name="max" value="1" min="1" style="width:80px" placeholder="Устройств">
             <select name="level">
-              <option value="legit">Legit</option>
-              <option value="rage">Rage</option>
-              <option value="premium">Premium</option>
+              <option value="trial">Trial → TRIAL-</option>
+              <option value="free">Free → FREE-</option>
+              <option value="media">Media → MEDIA-</option>
+              <option value="premium">Premium → PREMIUM-</option>
             </select>
-            <input type="text" name="prefix" value="LORI" style="width:90px" placeholder="Префикс">
             <button class="btn btn-pink" type="submit">Создать</button>
           </div>
           <div class="form-row">
-            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=1">1 час</button>
-            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=24">1 день</button>
-            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=168">7 дней</button>
-            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=720">30 дней</button>
-            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=0">Навсегда</button>
+            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=1">1ч</button>
+            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=24">1д</button>
+            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=168">7д</button>
+            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=720">30д</button>
+            <button type="button" class="btn btn-dark btn-sm" onclick="this.form.hours.value=0">∞</button>
           </div>
         </form>
       </div>
 
     <?php elseif ($tab === 'bulk'): ?>
       <div class="card">
-        <h2>Массовая генерация (до 100 шт)</h2>
+        <h2>Массовая генерация (до 100)</h2>
         <form method="post">
           <input type="hidden" name="action" value="bulk_generate">
           <div class="form-row">
-            <input type="number" name="count" value="10" min="1" max="100" style="width:90px" placeholder="Кол-во">
-            <input type="number" name="hours" value="24" style="width:110px" placeholder="Часов">
-            <input type="number" name="max" value="1" min="1" style="width:80px" placeholder="Устройств">
+            <input type="number" name="count" value="10" min="1" max="100" style="width:80px">
+            <input type="number" name="hours" value="24" style="width:100px">
+            <input type="number" name="max" value="1" min="1" style="width:70px">
             <select name="level">
-              <option value="legit">Legit</option>
-              <option value="rage">Rage</option>
+              <option value="trial">Trial</option>
+              <option value="free">Free</option>
+              <option value="media">Media</option>
               <option value="premium">Premium</option>
             </select>
-            <input type="text" name="prefix" value="LORI" style="width:90px">
             <button class="btn btn-pink" type="submit">Сгенерировать</button>
           </div>
         </form>
@@ -574,68 +579,53 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
 
     <?php elseif ($tab === 'give'): ?>
       <div class="card">
-        <h2>Выдать ключ по Telegram ID</h2>
+        <h2>Выдать по Telegram ID</h2>
         <form method="post">
           <input type="hidden" name="action" value="give_key">
           <div class="form-row">
-            <input type="number" name="tg_id" placeholder="Telegram ID" required style="width:170px">
-            <input type="number" name="hours" value="24" style="width:100px">
-            <input type="number" name="max" value="1" style="width:80px">
+            <input type="number" name="tg_id" placeholder="Telegram ID" required style="width:160px">
+            <input type="number" name="hours" value="24" style="width:90px">
+            <input type="number" name="max" value="1" style="width:70px">
             <select name="level">
-              <option value="legit">Legit</option>
-              <option value="rage">Rage</option>
               <option value="premium">Premium</option>
+              <option value="media">Media</option>
+              <option value="free">Free</option>
+              <option value="trial">Trial</option>
             </select>
             <button class="btn btn-pink" type="submit">Выдать</button>
           </div>
         </form>
-        <p style="color:var(--muted);font-size:0.85rem;margin-top:8px">По username выдача невозможна напрямую (ограничение Telegram). Используйте числовой ID.</p>
       </div>
 
     <?php elseif ($tab === 'keys'): ?>
       <div class="card">
-        <h2>Все ключи (<?= $totalKeys ?>)</h2>
-        <input type="text" id="searchKey" placeholder="Поиск по ключу / ID / IP..." onkeyup="filterTable()" style="width:100%;max-width:320px;margin-bottom:12px">
+        <h2>Ключи (<?= $totalKeys ?>)</h2>
+        <input type="text" id="searchKey" placeholder="Поиск..." onkeyup="filterTable()" style="width:100%;max-width:300px;margin-bottom:12px">
         <div style="overflow-x:auto">
         <table id="keysTable">
-          <tr><th>Ключ</th><th>Уровень</th><th>Владелец</th><th>Статус</th><th>Устр.</th><th>Создан</th><th>Действия</th></tr>
+          <tr><th>Ключ</th><th>Тип</th><th>Владелец</th><th>Статус</th><th>Устр.</th><th></th></tr>
           <?php foreach ($db['keys'] as $k => $kd):
             $used = count($kd['activations'] ?? []);
             $max  = $kd['max'] ?? 1;
-            $lvl  = $kd['level'] ?? 'legit';
-            if (!empty($kd['is_frozen'])) $st = '<span class="badge badge-blue">Заморожен</span>';
+            $lvl  = $kd['level'] ?? 'trial';
+            if (!empty($kd['is_frozen'])) $st = '<span class="badge badge-blue">Freeze</span>';
             elseif (($kd['first_use'] ?? 0) == 0) $st = '<span class="badge badge-yellow">Не акт.</span>';
-            elseif (($kd['expires'] ?? 0) == 0) $st = '<span class="badge badge-green">Навсегда</span>';
+            elseif (($kd['expires'] ?? 0) == 0) $st = '<span class="badge badge-green">∞</span>';
             elseif (time() > $kd['expires']) $st = '<span class="badge badge-red">Истёк</span>';
             else $st = '<span class="badge badge-green">Активен</span>';
-            $lvlBadge = $lvl === 'premium' ? 'badge-purple' : ($lvl === 'rage' ? 'badge-red' : 'badge-green');
           ?>
           <tr>
-            <td><code><?= htmlspecialchars($k) ?></code></td>
-            <td><span class="badge <?= $lvlBadge ?>"><?= htmlspecialchars($lvl) ?></span></td>
-            <td><?= $kd['owner_tg'] ? $kd['owner_tg'] : '—' ?></td>
+            <td><a class="keylink" href="?admin&view=<?= urlencode($k) ?>"><code><?= htmlspecialchars($k) ?></code></a></td>
+            <td><?= htmlspecialchars($lvl) ?></td>
+            <td><?= $kd['owner_tg'] ?: '—' ?></td>
             <td><?= $st ?></td>
             <td><?= $used ?>/<?= $max ?></td>
-            <td style="font-size:0.75rem"><?= !empty($kd['created']) ? date('d.m H:i', $kd['created']) : '—' ?></td>
             <td style="white-space:nowrap">
               <form method="post" style="display:inline"><input type="hidden" name="action" value="reset_hwid"><input type="hidden" name="key" value="<?= htmlspecialchars($k) ?>"><button class="btn btn-dark btn-sm" type="submit">Сброс</button></form>
               <form method="post" style="display:inline"><input type="hidden" name="action" value="freeze_key"><input type="hidden" name="key" value="<?= htmlspecialchars($k) ?>"><button class="btn btn-dark btn-sm" type="submit"><?= !empty($kd['is_frozen'])?'Размор.':'Замор.' ?></button></form>
               <form method="post" style="display:inline" onsubmit="return confirm('Удалить?')"><input type="hidden" name="action" value="delete_key"><input type="hidden" name="key" value="<?= htmlspecialchars($k) ?>"><button class="btn btn-red btn-sm" type="submit">×</button></form>
             </td>
           </tr>
-          <?php if (!empty($kd['activations'])): ?>
-          <tr>
-            <td colspan="7" style="background:rgba(0,0,0,0.2);font-size:0.78rem;color:var(--muted)">
-              <?php foreach ($kd['activations'] as $a): ?>
-                HWID: <code><?= htmlspecialchars(substr($a['hwid']??'',0,20)) ?>…</code> |
-                IP: <?= htmlspecialchars($a['ip']??'') ?> |
-                Акт: <?= !empty($a['time']) ? date('d.m H:i', $a['time']) : '—' ?> |
-                Последний: <?= !empty($a['last_active']) ? date('d.m H:i', $a['last_active']) : '—' ?> |
-                Запусков: <?= $a['launches'] ?? 1 ?><br>
-              <?php endforeach; ?>
-            </td>
-          </tr>
-          <?php endif; ?>
           <?php endforeach; ?>
         </table>
         </div>
@@ -643,18 +633,18 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
 
     <?php elseif ($tab === 'online'): ?>
       <div class="card">
-        <h2>Сейчас онлайн (<?= $onlineCount ?>)</h2>
+        <h2>Онлайн (<?= $onlineCount ?>)</h2>
         <?php if (empty($db['online'])): ?>
           <p style="color:var(--muted)">Никого нет</p>
         <?php else: ?>
           <table>
-            <tr><th>Ключ</th><th>IP</th><th>HWID</th><th>Пинг</th><th>В сети с</th></tr>
+            <tr><th>Ключ</th><th>IP</th><th>HWID</th><th>Пинг</th><th>С</th></tr>
             <?php foreach ($db['online'] as $hwid => $info): ?>
             <tr>
               <td><code><?= htmlspecialchars($info['key'] ?? '—') ?></code></td>
               <td><?= htmlspecialchars($info['ip'] ?? '') ?></td>
-              <td style="font-size:0.75rem"><?= htmlspecialchars(substr($hwid,0,22)) ?>…</td>
-              <td><?= time() - ($info['last_ping']??0) ?> сек</td>
+              <td style="font-size:0.75rem"><?= htmlspecialchars(substr($hwid,0,20)) ?>…</td>
+              <td><?= time() - ($info['last_ping']??0) ?>с</td>
               <td style="font-size:0.78rem"><?= !empty($info['first_seen']) ? date('H:i:s', $info['first_seen']) : '—' ?></td>
             </tr>
             <?php endforeach; ?>
@@ -664,13 +654,12 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
 
     <?php elseif ($tab === 'broadcast'): ?>
       <div class="card">
-        <h2>Сообщение всем онлайн-клиентам</h2>
-        <p style="color:var(--muted);font-size:0.88rem;margin-bottom:10px">Клиент получает это сообщение при каждом status_check (пинге).</p>
+        <h2>Broadcast (всем онлайн)</h2>
         <form method="post">
           <input type="hidden" name="action" value="set_broadcast">
-          <textarea name="broadcast" placeholder="Текст сообщения..."><?= htmlspecialchars($db['settings']['broadcast'] ?? '') ?></textarea>
+          <textarea name="broadcast" placeholder="Сообщение..."><?= htmlspecialchars($db['settings']['broadcast'] ?? '') ?></textarea>
           <div class="form-row" style="margin-top:10px">
-            <button class="btn btn-pink" type="submit">Установить / Обновить</button>
+            <button class="btn btn-pink" type="submit">Установить</button>
             <button class="btn btn-dark" type="submit" onclick="this.form.broadcast.value=''">Очистить</button>
           </div>
         </form>
@@ -678,16 +667,16 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
 
     <?php elseif ($tab === 'blacklist'): ?>
       <div class="card">
-        <h2>Добавить в чёрный список</h2>
+        <h2>Добавить в ЧС</h2>
         <form method="post" class="form-row">
           <input type="hidden" name="action" value="add_blacklist">
-          <input type="text" name="value" placeholder="IP или HWID" required style="width:260px">
-          <input type="text" name="reason" placeholder="Причина" style="width:180px">
+          <input type="text" name="value" placeholder="IP или HWID" required style="width:240px">
+          <input type="text" name="reason" placeholder="Причина" style="width:160px">
           <button class="btn btn-red" type="submit">Добавить</button>
         </form>
       </div>
       <div class="card">
-        <h2>Чёрный список (<?= count($db['blacklist']) ?>)</h2>
+        <h2>ЧС (<?= count($db['blacklist']) ?>)</h2>
         <?php if (empty($db['blacklist'])): ?>
           <p style="color:var(--muted)">Пусто</p>
         <?php else: ?>
@@ -697,8 +686,8 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
             <tr>
               <td><code><?= htmlspecialchars($val) ?></code></td>
               <td><?= htmlspecialchars($info['reason'] ?? '') ?></td>
-              <td><?= date('d.m.Y H:i', $info['time'] ?? time()) ?></td>
-              <td><form method="post"><input type="hidden" name="action" value="remove_blacklist"><input type="hidden" name="value" value="<?= htmlspecialchars($val) ?>"><button class="btn btn-dark btn-sm" type="submit">Удалить</button></form></td>
+              <td><?= date('d.m H:i', $info['time'] ?? time()) ?></td>
+              <td><form method="post"><input type="hidden" name="action" value="remove_blacklist"><input type="hidden" name="value" value="<?= htmlspecialchars($val) ?>"><button class="btn btn-dark btn-sm" type="submit">×</button></form></td>
             </tr>
             <?php endforeach; ?>
           </table>
@@ -710,10 +699,10 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
         <h2>Настройки</h2>
         <form method="post">
           <input type="hidden" name="action" value="save_settings">
-          <div class="form-row"><label style="width:130px">Версия</label><input type="text" name="version" value="<?= htmlspecialchars($db['settings']['version']) ?>" style="width:180px"></div>
-          <div class="form-row"><label style="width:130px">Checksum</label><input type="text" name="checksum" value="<?= htmlspecialchars($db['settings']['checksum']) ?>" style="width:320px"></div>
-          <div class="form-row"><label style="width:130px">Download URL</label><input type="text" name="download_url" value="<?= htmlspecialchars($db['settings']['download_url']) ?>" style="width:320px"></div>
-          <div class="form-row" style="align-items:flex-start"><label style="width:130px;margin-top:8px">Emergency msg</label><textarea name="emergency_msg"><?= htmlspecialchars($db['settings']['emergency_msg']) ?></textarea></div>
+          <div class="form-row"><label style="width:120px">Версия</label><input type="text" name="version" value="<?= htmlspecialchars($db['settings']['version']) ?>" style="width:160px"></div>
+          <div class="form-row"><label style="width:120px">Checksum</label><input type="text" name="checksum" value="<?= htmlspecialchars($db['settings']['checksum']) ?>" style="width:300px"></div>
+          <div class="form-row"><label style="width:120px">Download URL</label><input type="text" name="download_url" value="<?= htmlspecialchars($db['settings']['download_url']) ?>" style="width:300px"></div>
+          <div class="form-row" style="align-items:flex-start"><label style="width:120px;margin-top:8px">Emergency</label><textarea name="emergency_msg"><?= htmlspecialchars($db['settings']['emergency_msg']) ?></textarea></div>
           <button class="btn btn-pink" type="submit" style="margin-top:10px">Сохранить</button>
         </form>
       </div>
@@ -732,11 +721,8 @@ details summary{cursor:pointer;color:var(--pink);font-size:0.8rem}
 </div>
 <script>
 function filterTable(){
-  const q = document.getElementById('searchKey').value.toLowerCase();
-  document.querySelectorAll('#keysTable tr').forEach((row,i)=>{
-    if(i===0) return;
-    row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
-  });
+  const q=document.getElementById('searchKey').value.toLowerCase();
+  document.querySelectorAll('#keysTable tr').forEach((row,i)=>{if(i===0)return;row.style.display=row.innerText.toLowerCase().includes(q)?'':'none'});
 }
 </script>
 </body>
@@ -791,11 +777,12 @@ if (isset($update['message']['successful_payment'])) {
     $parts   = explode('_', $payload);
     $duration = (int)($parts[1] ?? 0);
     $maxLimit = (int)($parts[2] ?? 1);
-    $newKey = 'LORI-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 10));
+    // Покупки всегда PREMIUM
+    $newKey = 'PREMIUM-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
     $db['keys'][$newKey] = [
         'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $maxLimit,
         'activations' => [], 'owner_tg' => $chatId, 'owner_name' => '', 'reset_left' => 2,
-        'is_frozen' => false, 'level' => 'legit', 'created' => time()
+        'is_frozen' => false, 'level' => 'premium', 'created' => time()
     ];
     saveDb();
     addLog("Куплен $newKey (Stars) юзером $chatId");
@@ -812,14 +799,18 @@ if (isset($update['message'])) {
             $args = explode(' ', $text);
             $hours = (int)($args[1] ?? 24);
             $max   = (int)($args[2] ?? 1);
+            $level = $args[3] ?? 'trial';
+            if (!in_array($level, ['trial','free','media','premium'])) $level = 'trial';
             $duration = $hours === 0 ? 0 : $hours * 3600;
-            $newKey = 'LORI-ADM-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
+            $prefix = getPrefixByLevel($level);
+            $newKey = $prefix . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
             $db['keys'][$newKey] = [
                 'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $max,
-                'activations' => [], 'owner_tg' => 0, 'reset_left' => 999, 'is_frozen' => false, 'level' => 'legit', 'created' => time()
+                'activations' => [], 'owner_tg' => 0, 'reset_left' => 999, 'is_frozen' => false,
+                'level' => $level, 'created' => time()
             ];
             saveDb();
-            sendMessage($chatId, "✅ Ключ: `$newKey`");
+            sendMessage($chatId, "✅ Ключ: `$newKey`\nТип: $level");
             exit;
         }
         if (strpos($text, '/give ') === 0) {
@@ -827,16 +818,20 @@ if (isset($update['message'])) {
             $target = (int)($args[1] ?? 0);
             $hours  = (int)($args[2] ?? 24);
             $max    = (int)($args[3] ?? 1);
+            $level  = $args[4] ?? 'premium';
+            if (!in_array($level, ['trial','free','media','premium'])) $level = 'premium';
             if ($target > 0) {
                 $duration = $hours === 0 ? 0 : $hours * 3600;
-                $newKey = 'LORI-GIFT-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
+                $prefix = getPrefixByLevel($level);
+                $newKey = $prefix . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
                 $db['keys'][$newKey] = [
                     'duration' => $duration, 'expires' => 0, 'first_use' => 0, 'max' => $max,
-                    'activations' => [], 'owner_tg' => $target, 'reset_left' => 2, 'is_frozen' => false, 'level' => 'legit', 'created' => time()
+                    'activations' => [], 'owner_tg' => $target, 'reset_left' => 2, 'is_frozen' => false,
+                    'level' => $level, 'created' => time()
                 ];
                 saveDb();
-                sendMessage($chatId, "🎁 Выдан `$newKey` → `$target`");
-                sendMessage($target, "🎁 Вам выдан ключ:\n`$newKey`");
+                sendMessage($chatId, "🎁 `$newKey` → `$target`");
+                sendMessage($target, "🎁 Вам выдан ключ:\n`$newKey`\nТип: $level");
             }
             exit;
         }
@@ -867,7 +862,7 @@ if (isset($update['callback_query'])) {
         $p = explode('_', $data);
         $starsMap = ['86400' => 25, '604800' => 75, '2592000' => 125, '0' => 400];
         $stars = $starsMap[$p[1]] ?? 25;
-        sendInvoice($chatId, 'Ключ Lori', 'Доступ к скрипту', "sub_{$p[1]}_{$p[2]}", $stars);
+        sendInvoice($chatId, 'Ключ Lori Premium', 'Доступ Premium', "sub_{$p[1]}_{$p[2]}", $stars);
     }
     elseif ($data === 'my_keys') {
         $found = false;
@@ -888,7 +883,7 @@ if (isset($update['callback_query'])) {
                     [['text' => '🔄 Сбросить HWID', 'callback_data' => 'user_reset_' . $k]],
                     [['text' => '« Назад', 'callback_data' => 'back_home']]
                 ]];
-                sendMessage($chatId, "🔑 `$k`\nУровень: " . ($kd['level']??'legit') . "\n$st\nУстройства: $used/$max", $kb);
+                sendMessage($chatId, "🔑 `$k`\nТип: " . ($kd['level']??'premium') . "\n$st\nУстройства: $used/$max", $kb);
             }
         }
         if (!$found) sendMessage($chatId, '📭 У вас пока нет ключей.');
@@ -901,13 +896,11 @@ if (isset($update['callback_query'])) {
                 $db['keys'][$key]['reset_left']--;
                 saveDb();
                 sendMessage($chatId, '✅ HWID сброшены');
-            } else {
-                sendMessage($chatId, '❌ Лимит сбросов закончился');
-            }
+            } else sendMessage($chatId, '❌ Лимит сбросов закончился');
         }
     }
     elseif ($data === 'admin_panel' && $chatId === $adminId) {
-        $text = "👑 **Админ-панель**\n\nКлючей: *" . count($db['keys']) . "*\nОнлайн: *" . count($db['online']) . "*\nСтатус: `{$db['settings']['status']}`\nSoft: `" . ($db['settings']['soft_status']??'undetected') . "`\n\n🌐 Веб: https://" . $_SERVER['HTTP_HOST'] . "/?admin";
+        $text = "👑 **Админ**\n\nКлючей: *" . count($db['keys']) . "*\nОнлайн: *" . count($db['online']) . "*\nСтатус: `{$db['settings']['status']}`\nSoft: `" . ($db['settings']['soft_status']??'undetected') . "`\n\n🌐 https://" . $_SERVER['HTTP_HOST'] . "/?admin";
         $kb = ['inline_keyboard' => [
             [['text' => '🟢 Онлайн', 'callback_data' => 'adm_online']],
             [['text' => '📊 Статистика', 'callback_data' => 'adm_stats']],
@@ -930,25 +923,25 @@ if (isset($update['callback_query'])) {
             elseif (($kd['expires']??0)==0 || time()<($kd['expires']??0)) $a++;
             else $e++;
         }
-        $text = "📊 **Статистика**\n\nВсего: " . count($db['keys']) . "\nАктивных: $a\nЗаморожено: $f\nИстекло: $e\nОнлайн: " . count($db['online']) . "\nВ ЧС: " . count($db['blacklist']);
+        $text = "📊 **Статистика**\n\nВсего: " . count($db['keys']) . "\nАктивных: $a\nЗаморожено: $f\nИстекло: $e\nОнлайн: " . count($db['online']);
         sendMessage($chatId, $text, ['inline_keyboard' => [[['text' => '« Назад', 'callback_data' => 'admin_panel']]]]);
     }
     elseif ($data === 'toggle_killswitch' && $chatId === $adminId) {
         if ($db['settings']['status'] === 'killswitch') {
             $db['settings']['status'] = 'online';
             $db['settings']['emergency_msg'] = '';
-            sendMessage($chatId, '🟢 Killswitch выключен');
+            sendMessage($chatId, '🟢 Killswitch выкл');
         } else {
             $db['settings']['status'] = 'killswitch';
             $db['settings']['emergency_msg'] = '🚨 Софт экстренно остановлен!';
-            sendMessage($chatId, '🚨 Killswitch включён');
+            sendMessage($chatId, '🚨 Killswitch вкл');
         }
         saveDb();
     }
     elseif ($data === 'toggle_gfreeze' && $chatId === $adminId) {
         $db['settings']['global_freeze'] = empty($db['settings']['global_freeze']);
         saveDb();
-        sendMessage($chatId, !empty($db['settings']['global_freeze']) ? '❄️ Глобальная заморозка ВКЛ' : '🔓 Глобальная заморозка ВЫКЛ');
+        sendMessage($chatId, !empty($db['settings']['global_freeze']) ? '❄️ Global freeze ВКЛ' : '🔓 Global freeze ВЫКЛ');
     }
     elseif ($data === 'adm_logs' && $chatId === $adminId) {
         $text = "📜 **Логи:**\n\n";
