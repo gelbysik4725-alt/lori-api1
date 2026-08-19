@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: lori-bot
+    env: php
+    plan: free
+    buildCommand: ""
+    startCommand: "php -S 0.0.0.0:$PORT"
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: API_SECRET
+        sync: false
