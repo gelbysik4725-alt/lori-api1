@@ -26,7 +26,12 @@
         }
     },
     "blacklist": [],
-    "logs": [],
+    "logs": [
+        {
+            "time": 1787499763,
+            "text": "Key: PREMIUM-A2505A60"
+        }
+    ],
     "online": [],
     "login_log": [
         {
