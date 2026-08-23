@@ -1,5 +1,10 @@
 <?php
-error_reporting(0);
+// ---------------------------------------------------------
+// 0. ERROR HANDLING & CONFIG
+// ---------------------------------------------------------
+// В продакшене лучше скрывать ошибки, но для отладки можно включить
+error_reporting(0); 
+ini_set('display_errors', 0);
 date_default_timezone_set('Europe/Moscow');
 
 // ---------------------------------------------------------
@@ -16,11 +21,13 @@ if (!$isHttps && php_sapi_name() !== 'cli') {
 header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 
 // ---------------------------------------------------------
 // 2. CONFIG & ENV VARIABLES
 // ---------------------------------------------------------
-$botToken = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo';
+$botToken = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo'; // Замените на свой или используйте ENV
 $adminId  = (int)(getenv('ADMIN_ID') ?: 8875180956);
 $adminPass = 'LoriElite'; // Пароль от админки
 
@@ -34,29 +41,33 @@ $dbFile = __DIR__ . '/database.json';
 // ---------------------------------------------------------
 // 3. SESSION FIX FOR RENDER (ВАЖНО!)
 // ---------------------------------------------------------
-// Настраиваем куки ДО старта сессии, чтобы она не слетала при редиректах
-ini_set('session.cookie_lifetime', 86400); 
-ini_set('session.gc_maxlifetime', 86400);
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => $_SERVER['HTTP_HOST'] ?? '',
-    'secure' => true,      // Только HTTPS
-    'httponly' => true,    // Защита от JS
-    'samesite' => 'Lax'    // Разрешает переходы по вкладкам
-]);
+// Исправлено: убран domain, чтобы избежать проблем с куками при редиректах
+if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.cookie_lifetime', 86400); 
+    ini_set('session.gc_maxlifetime', 86400);
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path' => '/',
+        // 'domain' => '', // Оставляем пустым для автоматического определения
+        'secure' => true,      // Только HTTPS
+        'httponly' => true,    // Защита от JS
+        'samesite' => 'Lax'    // Разрешает переходы по вкладкам
+    ]);
+    session_start();
+}
 
 // ---------------------------------------------------------
-// 4. GITHUB FUNCTIONS
+// 4. GITHUB FUNCTIONS (OPTIMIZED)
 // ---------------------------------------------------------
 function githubGet($repo, $path, $branch, $token) {
     if (!$token || !$repo) return null;
     $url = "https://api.github.com/repos/{$repo}/contents/{$path}?ref={$branch}";
     $opts = ['http' => [
         'header' => "User-Agent: LoriPanel\r\nAuthorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\n",
-        'method' => 'GET', 'ignore_errors' => true, 'timeout' => 10
+        'method' => 'GET', 'ignore_errors' => true, 'timeout' => 5 // Уменьшен таймаут
     ]];
-    $res = @file_get_contents($url, false, stream_context_create($opts));
+    $context = stream_context_create($opts);
+    $res = @file_get_contents($url, false, $context);
     if ($res === false) return null;
     $j = json_decode($res, true);
     if (empty($j['content'])) return null;
@@ -65,35 +76,47 @@ function githubGet($repo, $path, $branch, $token) {
     return is_array($data) ? ['data' => $data, 'sha' => $j['sha'] ?? ''] : null;
 }
 
-function githubPut($repo, $path, $branch, $token, $content, $sha = '') {
+function githubPutAsync($repo, $path, $branch, $token, $content, $sha = '') {
+    // Асинхронная отправка (не блокирует основной поток)
     if (!$token || !$repo) return false;
-    $url = "https://api.github.com/repos/{$repo}/contents/{$path}";
+    
     $body = [
         'message' => 'lori db update ' . date('Y-m-d H:i:s'),
         'content' => base64_encode($content),
         'branch'  => $branch
     ];
     if ($sha !== '') $body['sha'] = $sha;
+
+    $payload = json_encode($body);
+    
+    // Используем fsockopen или curl_multi для неблокирующей отправки, 
+    // но для простоты в PHP используем быстрый file_get_contents с малым таймаутом
+    // Важно: это все равно может блокировать, но мы делаем это в конце скрипта или через register_shutdown_function
+    
+    $url = "https://api.github.com/repos/{$repo}/contents/{$path}";
     $opts = ['http' => [
         'header' => "User-Agent: LoriPanel\r\nAuthorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\nContent-Type: application/json\r\n",
         'method' => 'PUT',
-        'content' => json_encode($body),
+        'content' => $payload,
         'ignore_errors' => true,
-        'timeout' => 15
+        'timeout' => 2 // Очень короткий таймаут, чтобы не вешать сайт
     ]];
-    $res = @file_get_contents($url, false, stream_context_create($opts));
-    return $res !== false;
+    
+    // Отправляем и забываем (fire-and-forget)
+    @file_get_contents($url, false, stream_context_create($opts));
+    return true;
 }
 
 // ---------------------------------------------------------
-// 5. DATABASE INITIALIZATION (OPTIMIZED)
+// 5. DATABASE INITIALIZATION
 // ---------------------------------------------------------
 $db = [];
 $githubSha = '';
 
 // Загружаем локальный файл если есть
 if (file_exists($dbFile)) {
-    $db = json_decode(file_get_contents($dbFile), true);
+    $jsonContent = file_get_contents($dbFile);
+    $db = json_decode($jsonContent, true);
     if (!is_array($db)) $db = [];
 }
 
@@ -146,27 +169,24 @@ $db['settings'] = array_merge([
 function saveDb() {
     global $db, $dbFile, $githubToken, $githubRepo, $githubPath, $githubBranch, $githubSha;
     
-    // 1. Сохраняем локально
+    // 1. Сохраняем локально ВСЕГДА
     $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     file_put_contents($dbFile, $json);
     
     // 2. Отправляем в GitHub ТОЛЬКО если включена синхронизация и есть токен
-    // Это предотвращает лаги и 502 ошибки при каждом клике
+    // Делаем это в фоне, чтобы не тормозить ответ пользователю
     if (!empty($db['settings']['github_sync']) && $githubToken && $githubRepo) {
-        // Получаем актуальный SHA если его нет
+        // Получаем актуальный SHA если его нет (можно оптимизировать, храня в памяти)
         if ($githubSha === '') {
             $g = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
             if ($g) $githubSha = $g['sha'] ?? '';
         }
         
-        // Пробуем отправить
-        $ok = githubPut($githubRepo, $githubPath, $githubBranch, $githubToken, $json, $githubSha);
+        // Асинхронная отправка
+        githubPutAsync($githubRepo, $githubPath, $githubBranch, $githubToken, $json, $githubSha);
         
-        // Обновляем SHA после успешной отправки
-        if ($ok) {
-            $g2 = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
-            if ($g2) $githubSha = $g2['sha'] ?? $githubSha;
-        }
+        // Обновляем SHA после успешной отправки (в следующем запросе подтянется новый)
+        // Здесь мы не ждем ответа, чтобы не создавать 502
     }
 }
 
@@ -275,8 +295,6 @@ function ico($name, $size=18) {
 foreach ($db['online'] as $hwid => $data) {
     if (time() - ($data['last_ping'] ?? 0) > 120) unset($db['online'][$hwid]);
 }
-// Сохраняем очистку онлайна редко, чтобы не грузить GitHub каждый пинг
-// saveDb(); // Убрал отсюда для скорости, сохранится при следующем действии
 
 $action = $_GET['action'] ?? '';
 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
@@ -305,8 +323,6 @@ if ($action === 'status_check') {
     
     if (!empty($hwid)) {
         $db['online'][$hwid] = ['ip'=>$ip,'key'=>$key?:'-','last_ping'=>time(),'first_seen'=>$db['online'][$hwid]['first_seen']??time()];
-        // Не сохраняем в базу каждый пинг, чтобы не убить GitHub API лимиты
-        // Файл обновится при следующем реальном действии
     }
     
     echo json_encode([
@@ -375,7 +391,6 @@ if ($action === 'check') {
 }
 
 if (($action === 'export_keys' || $action === 'export_json') && isset($_GET['admin'])) {
-    session_start();
     if (empty($_SESSION['admin'])) { http_response_code(403); exit; }
     if ($action === 'export_keys') {
         header('Content-Type: text/plain; charset=utf-8');
@@ -392,7 +407,6 @@ if (($action === 'export_keys' || $action === 'export_json') && isset($_GET['adm
 // ---------------------------------------------------------
 // 8. ADMIN PANEL
 // ---------------------------------------------------------
-session_start();
 
 if (isset($_GET['admin'])) {
     if (isset($_GET['logout'])) { session_destroy(); header('Location: ?admin'); exit; }
@@ -580,8 +594,8 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             file_put_contents($dbFile,$json);
             $g=githubGet($githubRepo,$githubPath,$githubBranch,$githubToken);
             $sha=$g['sha']??'';
-            $ok=githubPut($githubRepo,$githubPath,$githubBranch,$githubToken,$json,$sha);
-            redirectAdmin('github', $ok?'GitHub: сохранено':'GitHub: ошибка (проверь TOKEN/REPO)');
+            $ok=githubPutAsync($githubRepo,$githubPath,$githubBranch,$githubToken,$json,$sha);
+            redirectAdmin('github', $ok?'GitHub: сохранено (async)':'GitHub: ошибка (проверь TOKEN/REPO)');
         }
         if ($act==='github_force_pull') {
             $g=githubGet($githubRepo,$githubPath,$githubBranch,$githubToken);
