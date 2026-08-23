@@ -47,30 +47,6 @@
             "color": "",
             "pulse": false,
             "silent": false
-        },
-        "PREMIUM-3B3809AF": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787503733,
-            "warns": 0,
-            "note": "",
-            "aura": false,
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
         }
     },
     "blacklist": [],
@@ -90,6 +66,11 @@
     ],
     "online": [],
     "login_log": [
+        {
+            "time": 1787503755,
+            "ip": "179.254.114.251",
+            "ok": false
+        },
         {
             "time": 1787503723,
             "ip": "179.254.114.251",
