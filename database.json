@@ -47,91 +47,10 @@
             "color": "",
             "pulse": false,
             "silent": false
-        },
-        "PREMIUM-388F6137": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787516068,
-            "warns": 0,
-            "note": "",
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
-        },
-        "PREMIUM-29AF6893": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787516070,
-            "warns": 0,
-            "note": "",
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
-        },
-        "PREMIUM-DBFF4D5C": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787516072,
-            "warns": 0,
-            "note": "",
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
         }
     },
     "blacklist": [],
     "logs": [
-        {
-            "time": 1787516074,
-            "text": "Key: PREMIUM-DBFF4D5C"
-        },
-        {
-            "time": 1787516071,
-            "text": "Key: PREMIUM-29AF6893"
-        },
-        {
-            "time": 1787516069,
-            "text": "Key: PREMIUM-388F6137"
-        },
         {
             "time": 1787508917,
             "text": "Admin login from 31.76.252.75"
@@ -191,6 +110,11 @@
     ],
     "online": [],
     "login_log": [
+        {
+            "time": 1787516087,
+            "ip": "31.76.252.75",
+            "ok": true
+        },
         {
             "time": 1787516054,
             "ip": "31.76.252.75",
