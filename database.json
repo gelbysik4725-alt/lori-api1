@@ -52,6 +52,10 @@
     "blacklist": [],
     "logs": [
         {
+            "time": 1787503406,
+            "text": "HWID reset PREMIUM-A2505A60"
+        },
+        {
             "time": 1787501788,
             "text": "Key: PREMIUM-6E0639FF"
         },
