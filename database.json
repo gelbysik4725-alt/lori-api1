@@ -76,6 +76,10 @@
     "blacklist": [],
     "logs": [
         {
+            "time": 1787501792,
+            "text": "Key: TRIAL-1B167846"
+        },
+        {
             "time": 1787501788,
             "text": "Key: PREMIUM-6E0639FF"
         },
