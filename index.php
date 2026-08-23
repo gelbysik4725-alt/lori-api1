@@ -1231,3 +1231,622 @@ if (isset($update['callback_query'])) {
     if ($data==='toggle_gfreeze'){$db['settings']['global_freeze']=empty($db['settings']['global_freeze']);saveDb();answerCallback($cqId,'OK');exit;}
     if ($data==='noop'){answerCallback($cqId);exit;}
 }
+
+
+
+<?php
+error_reporting(0);
+date_default_timezone_set('Europe/Moscow');
+
+// ---------------------------------------------------------
+// 1. CONFIG & SECURITY
+// ---------------------------------------------------------
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
+if (!$isHttps && php_sapi_name() !== 'cli') {
+    header('Location: https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'], true, 301);
+    exit;
+}
+
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+
+$botToken = getenv('BOT_TOKEN') ?: 'ВАШ_ТОКЕН';
+$adminId  = (int)(getenv('ADMIN_ID') ?: 123456789);
+$adminPass = 'LoriElite'; 
+
+// GitHub Sync Config
+$ghToken  = getenv('GITHUB_TOKEN') ?: '';
+$ghRepo   = getenv('GITHUB_REPO') ?: ''; 
+$ghPath   = getenv('GITHUB_PATH') ?: 'database.json';
+$ghBranch = getenv('GITHUB_BRANCH') ?: 'main';
+
+$dbFile = __DIR__ . '/database.json';
+$ghShaCacheFile = __DIR__ . '/.gh_sha_cache'; 
+
+// ---------------------------------------------------------
+// 2. SESSION & AUTH
+// ---------------------------------------------------------
+if (session_status() === PHP_SESSION_NONE) {
+    session_name('LORI_V6_SID');
+    ini_set('session.cookie_lifetime', 86400);
+    ini_set('session.gc_maxlifetime', 86400);
+    session_set_cookie_params([
+        'lifetime' => 86400, 'path' => '/', 'domain' => '',
+        'secure' => true, 'httponly' => true, 'samesite' => 'Lax'
+    ]);
+    session_start();
+}
+
+// Anti-Brute Force
+if (!isset($_SESSION['login_attempts'])) $_SESSION['login_attempts'] = 0;
+if ($_SESSION['login_attempts'] > 5) {
+    die('Too many attempts. Wait 15 mins.');
+}
+
+// ---------------------------------------------------------
+// 3. GITHUB HELPERS
+// ---------------------------------------------------------
+function ghGet($token, $repo, $path, $branch) {
+    if (!$token || !$repo) return null;
+    $url = "https://api.github.com/repos/{$repo}/contents/{$path}?ref={$branch}";
+    $ctx = stream_context_create(['http' => [
+        'header' => "Authorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\n",
+        'timeout' => 5, 'ignore_errors' => true
+    ]]);
+    $res = @file_get_contents($url, false, $ctx);
+    if ($res === false) return null;
+    $j = json_decode($res, true);
+    if (empty($j['content'])) return null;
+    return [
+        'data' => json_decode(base64_decode(str_replace("\n", '', $j['content'])), true),
+        'sha'  => $j['sha']
+    ];
+}
+
+function ghPut($token, $repo, $path, $branch, $content, $sha) {
+    if (!$token || !$repo) return false;
+    $url = "https://api.github.com/repos/{$repo}/contents/{$path}";
+    $body = json_encode([
+        'message' => 'Auto-update DB ' . date('H:i:s'),
+        'content' => base64_encode($content),
+        'branch'  => $branch,
+        'sha'     => $sha
+    ]);
+    $ctx = stream_context_create(['http' => [
+        'method'  => 'PUT',
+        'header'  => "Authorization: token {$token}\r\nContent-Type: application/json\r\n",
+        'content' => $body,
+        'timeout' => 10, 'ignore_errors' => true
+    ]]);
+    $res = @file_get_contents($url, false, $ctx);
+    return ($res !== false); 
+}
+
+$currentSha = @file_get_contents($ghShaCacheFile);
+if (!$currentSha && $ghToken && $ghRepo) {
+    $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+    if ($g) {
+        $currentSha = $g['sha'];
+        @file_put_contents($ghShaCacheFile, $currentSha);
+    }
+}
+
+// ---------------------------------------------------------
+// 4. DATABASE LOGIC
+// ---------------------------------------------------------
+$db = [];
+if (file_exists($dbFile)) {
+    $db = json_decode(file_get_contents($dbFile), true);
+    if (!is_array($db)) $db = [];
+}
+
+if (empty($db['keys']) && $ghToken && $ghRepo) {
+    $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+    if ($g && is_array($g['data'])) {
+        $db = $g['data'];
+        file_put_contents($dbFile, json_encode($db));
+        if ($g['sha']) {
+            $currentSha = $g['sha'];
+            @file_put_contents($ghShaCacheFile, $currentSha);
+        }
+    }
+}
+
+// Init Structures
+foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log','notes_global','admin_history'] as $k) {
+    if (!isset($db[$k])) $db[$k] = [];
+}
+if (!isset($db['settings'])) $db['settings'] = [];
+if (!isset($db['stats'])) $db['stats'] = ['purchases'=>0,'stars'=>0,'activations'=>0];
+
+$db['settings'] = array_merge([
+    'status' => 'online', 'soft_status' => 'undetected', 'global_freeze' => false,
+    'version' => '6.0.0', 'checksum' => 'new_checksum_v6', 'download_url' => '',
+    'panel_accent' => '#6366f1', 'panel_bg_color' => '#0f172a', // New Indigo Theme
+    'user_hwid_resets' => 2, 'user_freeze_per_week' => 2,
+    'bot_welcome' => "👋 <b>LORI v6</b>\nВыберите действие:",
+    'purchases_enabled' => true, 'github_sync' => true,
+    'theme_mode' => 'dark', 'auto_cleanup' => true
+], $db['settings']);
+
+function saveDb() {
+    global $db, $dbFile, $ghToken, $ghRepo, $ghPath, $ghBranch, $currentSha;
+    $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    file_put_contents($dbFile, $json);
+    
+    if (!empty($db['settings']['github_sync']) && $ghToken && $ghRepo) {
+        $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+        $shaToSend = $g ? $g['sha'] : $currentSha;
+        if ($shaToSend) ghPut($ghToken, $ghRepo, $ghPath, $ghBranch, $json, $shaToSend);
+    }
+}
+
+function addLog($text) {
+    global $db;
+    array_unshift($db['logs'], ['time'=>time(),'text'=>$text]);
+    if (count($db['logs']) > 600) array_pop($db['logs']);
+    saveDb();
+}
+
+function addAdminHistory($action, $details) {
+    global $db, $ip;
+    array_unshift($db['admin_history'], ['time'=>time(), 'ip'=>$ip, 'action'=>$action, 'details'=>$details]);
+    if (count($db['admin_history']) > 200) array_pop($db['admin_history']);
+    saveDb();
+}
+
+function makeKeyData($duration, $max, $level, $owner_tg=0, $owner_name='', $named=false) {
+    global $db;
+    return [
+        'duration'=>$duration,'expires'=>0,'first_use'=>0,'max'=>$max,
+        'activations'=>[],'owner_tg'=>$owner_tg,'owner_name'=>$owner_name,
+        'reset_left'=>(int)($db['settings']['user_hwid_resets']??2),
+        'is_frozen'=>false,'level'=>$level,'created'=>time(),
+        'warns'=>0,'note'=>'','named'=>$named,'tag'=>'',
+        'soft_ban_until'=>0,'android_id'=>'','freeze_week'=>[],
+        'pulse'=>false,'silent'=>false, 'priority_support' => false
+    ];
+}
+
+function redirectAdmin($tab='dashboard', $msg='') {
+    $url = '?admin&tab='.urlencode($tab);
+    if ($msg !== '') $url .= '&msg='.urlencode($msg);
+    header('Location: '.$url); exit;
+}
+
+function weekId() { return date('o-W'); }
+
+// Icons SVG
+function ico($name, $size=20) {
+    $s = (int)$size; $c = 'currentColor';
+    $map = [
+        'home'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+        'key'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
+        'users'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+        'settings'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+        'zap'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        'shield'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        'trash'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+        'copy'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        'search'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+        'plus'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+        'moon'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+        'sun'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+        'github'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>',
+        'activity'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        'lock'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+        'unlock'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>',
+        'refresh'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+        'download'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+        'bell'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+        'tag'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+        'star'=>'<svg width="'.$s.'" height="'.$s.'" viewBox="0 0 24 24" fill="none" stroke="'.$c.'" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
+    ];
+    return $map[$name] ?? '';
+}
+
+// Cleanup Online
+foreach ($db['online'] as $hwid => $data) {
+    if (time() - ($data['last_ping'] ?? 0) > 120) unset($db['online'][$hwid]);
+}
+
+$action = $_GET['action'] ?? '';
+$ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+
+// ---------------------------------------------------------
+// 5. API ENDPOINTS
+// ---------------------------------------------------------
+if ($action === 'status_check') {
+    header('Content-Type: application/json; charset=utf-8');
+    $clientChecksum = $_POST['checksum'] ?? $_GET['checksum'] ?? '';
+    $hwid = $_POST['hwid'] ?? $_GET['hwid'] ?? '';
+    
+    if (!empty($clientChecksum) && strtolower($clientChecksum) !== strtolower($db['settings']['checksum'])) {
+        echo json_encode(['status'=>'error','message'=>'Modification detected']); exit;
+    }
+    if ($db['settings']['status'] === 'killswitch') {
+        echo json_encode(['status'=>'killswitch','message'=>$db['settings']['emergency_msg']?:'Stopped']); exit;
+    }
+    
+    if (!empty($hwid)) {
+        $db['online'][$hwid] = ['ip'=>$ip,'last_ping'=>time()];
+    }
+    
+    echo json_encode([
+        'status'=>$db['settings']['status'],
+        'version'=>$db['settings']['version'],
+        'url'=>$db['settings']['download_url']
+    ]);
+    exit;
+}
+
+if ($action === 'check') {
+    header('Content-Type: text/plain; charset=utf-8');
+    $key  = trim($_POST['key'] ?? '');
+    $hwid = trim($_POST['hwid'] ?? '');
+    
+    if ($db['settings']['status'] === 'killswitch') { echo 'Stopped'; exit; }
+    if (empty($key) || empty($hwid)) { echo 'No key/HWID'; exit; }
+    
+    if (!isset($db['keys'][$key])) { echo 'Invalid'; exit; }
+    
+    $kd = $db['keys'][$key];
+    $now = time();
+    if (!empty($kd['is_frozen'])) { echo 'Frozen'; exit; }
+    if (($kd['expires'] ?? 0) !== 0 && $now > $kd['expires']) { echo 'Expired'; exit; }
+    
+    $max = (int)($kd['max'] ?? 1);
+    $acts = $kd['activations'] ?? [];
+    
+    // Check HWID
+    foreach ($acts as &$a) {
+        if (($a['hwid'] ?? '') === $hwid) {
+            $a['last_active']=$now; 
+            saveDb(); echo 'SUCCESS'; exit;
+        }
+    }
+    
+    if (count($acts) < $max) {
+        $db['keys'][$key]['activations'][] = ['hwid'=>$hwid,'ip'=>$ip,'time'=>$now];
+        if (($kd['first_use'] ?? 0) == 0) {
+            $db['keys'][$key]['first_use'] = $now;
+            if (($kd['duration'] ?? 0) > 0) $db['keys'][$key]['expires'] = $now + $kd['duration'];
+        }
+        saveDb(); echo 'SUCCESS';
+    } else {
+        echo 'Limit';
+    }
+    exit;
+}
+
+// ---------------------------------------------------------
+// 6. ADMIN PANEL
+// ---------------------------------------------------------
+if (isset($_GET['admin'])) {
+    if (isset($_GET['logout'])) { session_destroy(); header('Location: ?admin'); exit; }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
+        if ($_POST['password'] === $adminPass) {
+            $_SESSION['admin'] = true;
+            $_SESSION['login_attempts'] = 0;
+            addLog("Admin login from $ip");
+            header('Location: ?admin'); exit;
+        }
+        $_SESSION['login_attempts']++;
+        addLog("Failed login attempt from $ip");
+        $loginError = 'Неверный пароль';
+    }
+
+    if (empty($_SESSION['admin'])) {
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LORI Login</title>
+        <style>
+            body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:system-ui;color:#fff}
+            .card{background:rgba(30,41,59,0.7);backdrop-filter:blur(10px);padding:40px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);width:320px;text-align:center}
+            input{width:100%;padding:12px;margin:10px 0;background:rgba(0,0,0,0.3);border:1px solid #334155;border-radius:8px;color:#fff;outline:none}
+            button{width:100%;padding:12px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-weight:bold;cursor:pointer;margin-top:10px}
+            button:hover{background:#4f46e5}
+            .err{color:#ef4444;font-size:12px;margin-bottom:10px}
+        </style></head><body>
+        <div class="card">
+            <h2 style="margin:0 0 20px 0;color:#6366f1">LORI v6</h2>
+            '.(!empty($loginError)?'<div class="err">'.$loginError.'</div>':'').'
+            <form method="post"><input type="password" name="password" placeholder="Access Code" required autofocus>
+            <button type="submit">ENTER SYSTEM</button></form>
+        </div></body></html>';
+        exit;
+    }
+
+    $tab = $_GET['tab'] ?? 'dashboard';
+    $viewKey = $_GET['view'] ?? '';
+    $msg = isset($_GET['msg']) ? htmlspecialchars($_GET['msg']) : '';
+
+    // --- ADMIN ACTIONS ---
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+        $act = $_POST['action'];
+        $k = $_POST['key'] ?? '';
+
+        if ($act === 'gen_key') {
+            $hours=(int)($_POST['hours']??24); $max=max(1,(int)($_POST['max']??1));
+            $level=$_POST['level']??'premium';
+            $customName=trim($_POST['custom_name']??''); 
+            $duration=$hours===0?0:$hours*3600;
+            
+            if ($customName!=='') {
+                if (isset($db['keys'][$customName])) redirectAdmin('generate','Имя занято');
+                $db['keys'][$customName]=makeKeyData($duration,$max,$level,0,$customName,true);
+                $newKey = $customName;
+            } else {
+                $newKey=strtoupper($level).'-'.strtoupper(substr(md5(uniqid(mt_rand(),true)),0,8));
+                $db['keys'][$newKey]=makeKeyData($duration,$max,$level);
+            }
+            saveDb(); addAdminHistory('Create Key', $newKey);
+            redirectAdmin('generate',"Создан: $newKey");
+        }
+
+        if ($k && isset($db['keys'][$k])) {
+            if ($act==='delete_key') { 
+                unset($db['keys'][$k]); saveDb(); addAdminHistory('Delete Key', $k);
+                redirectAdmin('keys','Удалён'); 
+            }
+            if ($act==='freeze_key') { 
+                $db['keys'][$k]['is_frozen']=empty($db['keys'][$k]['is_frozen']); saveDb(); 
+                header('Location:?admin&view='.urlencode($k).'&msg=Status Changed'); exit; 
+            }
+            if ($act==='reset_hwid') { 
+                $db['keys'][$k]['activations']=[]; saveDb(); addAdminHistory('HWID Reset', $k);
+                header('Location:?admin&view='.urlencode($k).'&msg=HWID Cleared'); exit; 
+            }
+            if ($act==='extend_key') {
+                $days=max(1,(int)($_POST['days']??7));
+                if(($db['keys'][$k]['expires']??0)==0) $db['keys'][$k]['expires']=time()+$days*86400;
+                else $db['keys'][$k]['expires']+=$days*86400;
+                saveDb(); addAdminHistory('Extend Key', "$k +$days days");
+                header('Location:?admin&view='.urlencode($k).'&msg=Extended'); exit;
+            }
+            if ($act==='set_tag') {
+                $db['keys'][$k]['tag']=trim($_POST['tag']??''); saveDb();
+                header('Location:?admin&view='.urlencode($k).'&msg=Tag Updated'); exit;
+            }
+            if ($act==='toggle_priority') {
+                $db['keys'][$k]['priority_support']=empty($db['keys'][$k]['priority_support']); saveDb();
+                header('Location:?admin&view='.urlencode($k).'&msg=Priority Toggled'); exit;
+            }
+        }
+
+        if ($act==='save_settings') {
+            foreach(['version','checksum','download_url','bot_welcome'] as $f) if(isset($_POST[$f])) $db['settings'][$f]=trim($_POST[$f]);
+            $db['settings']['panel_accent']=trim($_POST['panel_accent']??'#6366f1');
+            $db['settings']['github_sync']=!empty($_POST['github_sync']);
+            saveDb(); redirectAdmin('settings','Сохранено');
+        }
+        
+        if ($act==='backup_db') {
+            header('Content-Type: application/json');
+            header('Content-Disposition: attachment; filename="lori_backup_'.date('Y-m-d').'.json"');
+            echo json_encode($db, JSON_PRETTY_PRINT);
+            exit;
+        }
+    }
+
+    // Stats
+    $totalKeys=count($db['keys']); 
+    $activeKeys=0; $expiredKeys=0;
+    foreach($db['keys'] as $kd){
+        if(($kd['expires']??0)==0 || time()<($kd['expires']??0)) $activeKeys++;
+        else $expiredKeys++;
+    }
+    $onlineCount=count($db['online']);
+    $accent=$db['settings']['panel_accent']??'#6366f1';
+
+    header('Content-Type: text/html; charset=utf-8');
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LORI v6 Admin</title>
+<style>
+:root{--bg:#0f172a;--card:rgba(30,41,59,0.6);--border:rgba(255,255,255,0.08);--accent:<?= $accent ?>;--text:#e2e8f0;--muted:#94a3b8}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex}
+/* Sidebar */
+.sidebar{width:240px;background:rgba(15,23,42,0.95);border-right:1px solid var(--border);padding:20px;display:flex;flex-direction:column;position:fixed;height:100vh;z-index:10}
+.logo{font-size:24px;font-weight:800;color:var(--accent);margin-bottom:30px;display:flex;align-items:center;gap:10px}
+.nav a{display:flex;align-items:center;gap:12px;padding:12px 16px;color:var(--muted);text-decoration:none;border-radius:12px;margin-bottom:4px;transition:0.2s}
+.nav a:hover,.nav a.active{background:rgba(255,255,255,0.05);color:#fff}
+.nav a.active{background:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+/* Main Content */
+.main{flex:1;margin-left:240px;padding:30px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px}
+.search-bar{background:var(--card);border:1px solid var(--border);padding:10px 20px;border-radius:50px;width:300px;color:#fff;outline:none;backdrop-filter:blur(5px)}
+/* Cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:30px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:24px;backdrop-filter:blur(12px);position:relative;overflow:hidden}
+.card h3{color:var(--muted);font-size:14px;margin-bottom:10px;font-weight:500}
+.card .val{font-size:28px;font-weight:700;color:#fff}
+.card .icon{position:absolute;right:20px;top:20px;opacity:0.2;color:var(--accent)}
+/* Keys List */
+.keys-container{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}
+.key-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;transition:0.3s;cursor:pointer;position:relative}
+.key-card:hover{transform:translateY(-5px);border-color:var(--accent)}
+.key-header{display:flex;justify-content:space-between;align-items:start;margin-bottom:15px}
+.key-name{font-weight:600;font-size:16px;color:#fff}
+.key-badge{font-size:10px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.1);color:var(--muted)}
+.key-stats{display:flex;gap:15px;font-size:13px;color:var(--muted)}
+.progress{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:15px;overflow:hidden}
+.progress-bar{height:100%;background:var(--accent);width:0%}
+/* Buttons */
+.btn{padding:10px 20px;border-radius:10px;border:none;font-weight:600;cursor:pointer;transition:0.2s;display:inline-flex;align-items:center;gap:8px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-danger{background:rgba(239,68,68,0.2);color:#ef4444}
+.msg{background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);color:#4ade80;padding:12px;border-radius:10px;margin-bottom:20px}
+
+@media(max-width:900px){.sidebar{width:70px;padding:10px}.logo span,.nav a span{display:none}.main{margin-left:70px}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="logo"><?= ico('zap',24) ?> <span>LORI v6</span></div>
+    <div class="nav">
+        <a href="?admin&tab=dashboard" class="<?= $tab==='dashboard'?'active':'' ?>"><?= ico('home') ?> <span>Dashboard</span></a>
+        <a href="?admin&tab=keys" class="<?= $tab==='keys'?'active':'' ?>"><?= ico('key') ?> <span>Keys</span></a>
+        <a href="?admin&tab=generate" class="<?= $tab==='generate'?'active':'' ?>"><?= ico('plus') ?> <span>Generate</span></a>
+        <a href="?admin&tab=settings" class="<?= $tab==='settings'?'active':'' ?>"><?= ico('settings') ?> <span>Settings</span></a>
+        <a href="?admin&tab=logs" class="<?= $tab==='logs'?'active':'' ?>"><?= ico('activity') ?> <span>Logs</span></a>
+    </div>
+    <div style="margin-top:auto">
+        <a href="?admin&logout=1" style="color:var(--muted);text-decoration:none;display:flex;align-items:center;gap:10px;padding:12px"><?= ico('unlock') ?> <span>Exit</span></a>
+    </div>
+</div>
+
+<div class="main">
+    <div class="header">
+        <h2><?= ucfirst($tab) ?></h2>
+        <input type="text" class="search-bar" placeholder="Search keys, users..." onkeyup="filterKeys(this.value)">
+    </div>
+
+    <?php if($msg): ?><div class="msg"><?= $msg ?></div><?php endif; ?>
+
+    <?php if ($tab==='dashboard'): ?>
+    <div class="grid">
+        <div class="card"><h3>Total Keys</h3><div class="val"><?= $totalKeys ?></div><div class="icon"><?= ico('key',40) ?></div></div>
+        <div class="card"><h3>Active Now</h3><div class="val" style="color:#4ade80"><?= $activeKeys ?></div><div class="icon"><?= ico('zap',40) ?></div></div>
+        <div class="card"><h3>Online Users</h3><div class="val" style="color:#60a5fa"><?= $onlineCount ?></div><div class="icon"><?= ico('users',40) ?></div></div>
+        <div class="card"><h3>Expired</h3><div class="val" style="color:#ef4444"><?= $expiredKeys ?></div><div class="icon"><?= ico('trash',40) ?></div></div>
+    </div>
+    
+    <div class="card">
+        <h3>System Status</h3>
+        <div style="display:flex;gap:20px;margin-top:15px">
+            <div><span style="color:var(--muted)">Version:</span> <?= $db['settings']['version'] ?></div>
+            <div><span style="color:var(--muted)">GitHub Sync:</span> <span style="color:<?= !empty($db['settings']['github_sync'])?'#4ade80':'#ef4444' ?>"><?= !empty($db['settings']['github_sync'])?'Active':'Disabled' ?></span></div>
+            <div><span style="color:var(--muted)">Server Time:</span> <?= date('H:i:s') ?></div>
+        </div>
+    </div>
+
+    <?php elseif ($tab==='keys'): ?>
+    <div class="keys-container" id="keysGrid">
+    <?php foreach($db['keys'] as $k=>$kd):
+        $used=count($kd['activations']??[]); $max=$kd['max']??1;
+        $leftDays = ($kd['expires']??0) > 0 ? ceil(max(0, ($kd['expires']-time())/86400)) : '∞';
+        $progress = ($kd['expires']??0) > 0 ? min(100, max(0, (($kd['expires']-time())/$kd['duration'])*100)) : 100;
+        $isFrozen = !empty($kd['is_frozen']);
+    ?>
+        <a href="?admin&view=<?= urlencode($k) ?>" class="key-card" style="text-decoration:none;color:inherit">
+            <div class="key-header">
+                <div class="key-name"><?= htmlspecialchars($k) ?></div>
+                <div class="key-badge"><?= $kd['level'] ?></div>
+            </div>
+            <div class="key-stats">
+                <span><?= ico('users',14) ?> <?= $used ?>/<?= $max ?></span>
+                <span><?= ico('activity',14) ?> <?= $leftDays ?>d</span>
+                <?php if(!empty($kd['priority_support'])): ?><span style="color:#fbbf24"><?= ico('star',14) ?> VIP</span><?php endif; ?>
+            </div>
+            <div class="progress"><div class="progress-bar" style="width:<?= $progress ?>%"></div></div>
+        </a>
+    <?php endforeach; ?>
+    </div>
+
+    <?php elseif ($tab==='generate'): ?>
+    <div class="card" style="max-width:500px">
+        <h3>Create New Key</h3>
+        <form method="post" style="margin-top:20px;display:flex;flex-direction:column;gap:15px">
+            <input type="hidden" name="action" value="gen_key">
+            <input type="text" name="custom_name" placeholder="Custom Name (Optional)" style="padding:12px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:8px;color:#fff">
+            <div style="display:flex;gap:10px">
+                <input type="number" name="hours" value="24" placeholder="Hours" style="flex:1;padding:12px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:8px;color:#fff">
+                <select name="level" style="flex:1;padding:12px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:8px;color:#fff">
+                    <option value="trial">Trial</option>
+                    <option value="premium" selected>Premium</option>
+                    <option value="elite">Elite</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" type="submit">Generate Key</button>
+        </form>
+    </div>
+
+    <?php elseif ($tab==='settings'): ?>
+    <div class="card" style="max-width:600px">
+        <h3>Global Settings</h3>
+        <form method="post" style="margin-top:20px;display:flex;flex-direction:column;gap:15px">
+            <input type="hidden" name="action" value="save_settings">
+            <label>Accent Color <input type="color" name="panel_accent" value="<?= $accent ?>" style="width:100%;height:40px;border:none;background:none"></label>
+            <label>Bot Welcome Message <textarea name="bot_welcome" style="width:100%;padding:10px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:8px;color:#fff"><?= htmlspecialchars($db['settings']['bot_welcome']) ?></textarea></label>
+            <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="github_sync" <?= !empty($db['settings']['github_sync'])?'checked':'' ?>> Enable GitHub Auto-Sync</label>
+            <button class="btn btn-primary" type="submit">Save Changes</button>
+            <hr style="border:0;border-top:1px solid var(--border);margin:10px 0">
+            <button class="btn btn-danger" type="submit" name="action" value="backup_db" formaction="?admin&tab=settings"><?= ico('download') ?> Download Backup</button>
+        </form>
+    </div>
+    
+    <?php elseif ($tab==='logs'): ?>
+    <div class="card">
+        <h3>Recent Activity</h3>
+        <div style="margin-top:15px">
+        <?php foreach(array_slice($db['logs'],0,50) as $log): ?>
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted)">
+                <span style="color:var(--accent)"><?= date('H:i:s',$log['time']) ?></span> <?= htmlspecialchars($log['text']) ?>
+            </div>
+        <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+</div>
+
+<script>
+function filterKeys(q) {
+    const cards = document.querySelectorAll('.key-card');
+    q = q.toLowerCase();
+    cards.forEach(card => {
+        const text = card.innerText.toLowerCase();
+        card.style.display = text.includes(q) ? 'block' : 'none';
+    });
+}
+</script>
+</body></html>
+<?php
+    exit;
+}
+
+// ---------------------------------------------------------
+// 7. TELEGRAM BOT (Basic)
+// ---------------------------------------------------------
+$content = file_get_contents('php://input');
+$update = json_decode($content, true);
+if (!$update) exit;
+
+function tgReq($method,$data){
+    global $botToken;
+    return file_get_contents("https://api.telegram.org/bot$botToken/$method?".http_build_query($data));
+}
+
+if (isset($update['message'])) {
+    $chatId = $update['message']['chat']['id'];
+    $text = $update['message']['text'];
+    
+    if ($text == '/start') {
+        tgReq('sendMessage', [
+            'chat_id' => $chatId,
+            'text' => $db['settings']['bot_welcome'],
+            'parse_mode' => 'HTML',
+            'reply_markup' => json_encode(['inline_keyboard' => [
+                [['text' => 'Check Key', 'callback_data' => 'check']],
+                [['text' => 'Buy Premium', 'callback_data' => 'buy']]
+            ]])
+        ]);
+    }
+}
+
+if (isset($update['callback_query'])) {
+    $cq = $update['callback_query'];
+    tgReq('answerCallbackQuery', ['callback_query_id' => $cq['id']]);
+    tgReq('sendMessage', ['chat_id' => $cq['message']['chat']['id'], 'text' => 'Functionality coming in v6.1']);
+}
+?>
