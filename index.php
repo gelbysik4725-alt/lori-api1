@@ -139,17 +139,14 @@ $db['settings'] = array_merge([
     'panel_bg' => '',
     'panel_bg_color' => '#030303',
     'panel_accent' => '#22c55e',
-    'panel_overlay' => '0.75',
-    'panel_blur' => '12',
-    'bot_welcome' => "LORI\nВыберите срок:",
+    'panel_overlay' => '0.55',
+    'panel_blur' => '0',
+    'bot_welcome' => "✨ <b>LORI</b>\nВыберите срок подписки:",
     'purchases_enabled' => true,
     'user_hwid_resets' => 2,
     'user_freeze_per_week' => 2,
-    'aura_hwid_resets' => 6,
-    'aura_freeze_per_week' => 6,
-    'aura_extra_devices' => 2,
     'maintenance_msg' => 'Сервер на обслуживании',
-    'github_sync' => true // Включаем синхронизацию
+    'github_sync' => true
 ], $db['settings']);
 
 function saveDb() {
@@ -201,7 +198,7 @@ function makeKeyData($duration, $max, $level, $owner_tg=0, $owner_name='', $name
         'activations'=>[],'owner_tg'=>$owner_tg,'owner_name'=>$owner_name,
         'reset_left'=>(int)($db['settings']['user_hwid_resets']??2),
         'is_frozen'=>false,'level'=>$level,'created'=>time(),
-        'warns'=>0,'note'=>'','aura'=>false,'named'=>$named,'tag'=>'',
+        'warns'=>0,'note'=>'','named'=>$named,'tag'=>'',
         'soft_ban_until'=>0,'android_id'=>'','freeze_week'=>[],
         'color'=>'','pulse'=>false,'silent'=>false
     ];
@@ -217,9 +214,7 @@ function weekId() { return date('o-W'); }
 
 function canUserFreeze($kd) {
     global $db;
-    $limit = !empty($kd['aura'])
-        ? (int)($db['settings']['aura_freeze_per_week'] ?? 6)
-        : (int)($db['settings']['user_freeze_per_week'] ?? 2);
+    $limit = (int)($db['settings']['user_freeze_per_week'] ?? 2);
     $w = weekId();
     $used = (int)($kd['freeze_week'][$w] ?? 0);
     return $used < $limit;
@@ -344,7 +339,6 @@ if ($action === 'check') {
     if (($kd['expires'] ?? 0) !== 0 && $now > $kd['expires']) { addAccessLog($key,$hwid,$ip,false); echo 'Expired'; exit; }
     
     $max = (int)($kd['max'] ?? 1);
-    if (!empty($kd['aura'])) $max += (int)($db['settings']['aura_extra_devices'] ?? 2);
     
     $acts = $kd['activations'] ?? [];
     foreach ($acts as &$a) {
@@ -479,13 +473,6 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             if ($act==='delete_key') { unset($db['keys'][$k]); saveDb(); redirectAdmin('keys','Удалён'); }
             if ($act==='add_warn') { $db['keys'][$k]['warns']=min(3,($db['keys'][$k]['warns']??0)+1); saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=Warn'); exit; }
             if ($act==='reset_warns') { $db['keys'][$k]['warns']=0; saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=OK'); exit; }
-            if ($act==='toggle_aura') {
-                $db['keys'][$k]['aura']=empty($db['keys'][$k]['aura']);
-                if (!empty($db['keys'][$k]['aura'])) {
-                    $db['keys'][$k]['reset_left']=max($db['keys'][$k]['reset_left']??0,(int)($db['settings']['aura_hwid_resets']??6));
-                }
-                saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=AURA'); exit;
-            }
             if ($act==='toggle_pulse') { $db['keys'][$k]['pulse']=empty($db['keys'][$k]['pulse']); saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=Pulse'); exit; }
             if ($act==='toggle_silent') { $db['keys'][$k]['silent']=empty($db['keys'][$k]['silent']); saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=Silent'); exit; }
             if ($act==='extend_key') {
@@ -517,7 +504,7 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             }
             if ($act==='set_owner_tg') { $db['keys'][$k]['owner_tg']=(int)($_POST['owner_tg']??0); saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=TG'); exit; }
             if ($act==='refill_resets') {
-                $n=!empty($db['keys'][$k]['aura'])?(int)($db['settings']['aura_hwid_resets']??6):(int)($db['settings']['user_hwid_resets']??2);
+                $n=(int)($db['settings']['user_hwid_resets']??2);
                 $db['keys'][$k]['reset_left']=$n; saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=Resets'); exit;
             }
             if ($act==='set_tag') { $db['keys'][$k]['tag']=trim($_POST['tag']??''); saveDb(); header('Location:?admin&view='.urlencode($k).'&msg=Tag'); exit; }
@@ -539,8 +526,6 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
         }
         if ($act==='bulk_freeze') { foreach($db['keys'] as &$kd)$kd['is_frozen']=true; unset($kd); saveDb(); redirectAdmin('tools','Freeze all'); }
         if ($act==='bulk_unfreeze') { foreach($db['keys'] as &$kd)$kd['is_frozen']=false; unset($kd); saveDb(); redirectAdmin('tools','Unfreeze'); }
-        if ($act==='mass_aura') { $n=0; foreach($db['keys'] as &$kd){ if(empty($kd['aura'])){$kd['aura']=true;$kd['reset_left']=max($kd['reset_left']??0,(int)$db['settings']['aura_hwid_resets']);$n++;}} unset($kd); saveDb(); redirectAdmin('tools',"AURA: $n"); }
-        if ($act==='mass_unaura') { foreach($db['keys'] as &$kd)$kd['aura']=false; unset($kd); saveDb(); redirectAdmin('tools','AURA off'); }
         if ($act==='toggle_global_freeze') { $db['settings']['global_freeze']=empty($db['settings']['global_freeze']); saveDb(); redirectAdmin('dashboard','OK'); }
         if ($act==='set_status') { $db['settings']['status']=$_POST['status']??'online'; saveDb(); redirectAdmin('dashboard','Status'); }
         if ($act==='set_soft_status') { $db['settings']['soft_status']=$_POST['soft_status']??'undetected'; saveDb(); redirectAdmin('dashboard','Soft'); }
@@ -557,9 +542,6 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             $db['settings']['github_sync']=!empty($_POST['github_sync']);
             $db['settings']['user_hwid_resets']=max(0,(int)($_POST['user_hwid_resets']??2));
             $db['settings']['user_freeze_per_week']=max(0,(int)($_POST['user_freeze_per_week']??2));
-            $db['settings']['aura_hwid_resets']=max(0,(int)($_POST['aura_hwid_resets']??6));
-            $db['settings']['aura_freeze_per_week']=max(0,(int)($_POST['aura_freeze_per_week']??6));
-            $db['settings']['aura_extra_devices']=max(0,(int)($_POST['aura_extra_devices']??2));
             saveDb(); redirectAdmin('settings','Сохранено');
         }
         if ($act==='set_panel_bg') {
@@ -568,8 +550,8 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             $db['settings']['panel_bg_color']=$c;
             $a=trim($_POST['panel_accent']??'#22c55e'); if(!preg_match('/^#[0-9A-Fa-f]{6}$/',$a))$a='#22c55e';
             $db['settings']['panel_accent']=$a;
-            $db['settings']['panel_overlay']=max(0.3,min(0.95,(float)($_POST['panel_overlay']??0.75)));
-            $db['settings']['panel_blur']=max(0,min(40,(int)($_POST['panel_blur']??12)));
+            $db['settings']['panel_overlay']=max(0.2,min(0.95,(float)($_POST['panel_overlay']??0.55)));
+            $db['settings']['panel_blur']=max(0,min(40,(int)($_POST['panel_blur']??0)));
             saveDb(); redirectAdmin('theme','Тема');
         }
         if ($act==='github_force_push') {
@@ -615,10 +597,6 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
             for($i=0;$i<$count;$i++){ $newKey=strtoupper($prefix).'-'.strtoupper(substr(md5(uniqid(mt_rand().$i,true)),0,8)); $db['keys'][$newKey]=makeKeyData($duration,1,'premium'); $list[]=$newKey; }
             saveDb(); redirectAdmin('tools','OK: '.implode(', ',$list));
         }
-        if ($act==='random_aura') {
-            $keys=array_keys($db['keys']); if($keys){ $rk=$keys[array_rand($keys)]; $db['keys'][$rk]['aura']=true; saveDb(); redirectAdmin('tools',"AURA → $rk"); }
-            redirectAdmin('tools','Нет ключей');
-        }
         if ($act==='strip_all_devices') {
             foreach($db['keys'] as &$kd) $kd['activations']=[]; unset($kd); saveDb(); redirectAdmin('tools','Все HWID сброшены');
         }
@@ -636,12 +614,11 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
     }
 
     $totalKeys=count($db['keys']); $onlineCount=count($db['online']);
-    $active=$frozen=$expired=$auraCount=$namedCount=0;
+    $active=$frozen=$expired=$namedCount=0;
     foreach($db['keys'] as $kd){
         if(!empty($kd['is_frozen']))$frozen++;
         elseif(($kd['expires']??0)==0||time()<($kd['expires']??0))$active++;
         else $expired++;
-        if(!empty($kd['aura']))$auraCount++;
         if(!empty($kd['named']))$namedCount++;
     }
     $githubOk = ($ghToken && $ghRepo);
@@ -649,8 +626,8 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
     $accent=$db['settings']['panel_accent']??'#22c55e';
     $panelBg=$db['settings']['panel_bg']??'';
     $panelBgColor=$db['settings']['panel_bg_color']??'#030303';
-    $overlay=$db['settings']['panel_overlay']??'0.75';
-    $blur=(int)($db['settings']['panel_blur']??12);
+    $overlay=$db['settings']['panel_overlay']??'0.55';
+    $blur=(int)($db['settings']['panel_blur']??0);
     $rgb=sscanf($accent,"#%02x%02x%02x")?:[34,197,94];
 
     header('Content-Type: text/html; charset=utf-8');
@@ -667,8 +644,8 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:13px}
 <?php if($panelBg): ?>
-body::before{content:'';position:fixed;inset:0;z-index:-2;background:url('<?= htmlspecialchars($panelBg) ?>') center/cover fixed;filter:blur(<?= $blur ?>px);transform:scale(1.05)}
-body::after{content:'';position:fixed;inset:0;z-index:-1;background:rgba(3,3,3,<?= $overlay ?>)}
+body::before{content:'';position:fixed;inset:0;z-index:-2;background:url('<?= htmlspecialchars($panelBg) ?>') no-repeat center center / cover;background-attachment:fixed;image-rendering:auto;-webkit-backface-visibility:hidden;backface-visibility:hidden;<?= $blur > 0 ? 'filter:blur('.$blur.'px);transform:scale(1.04);' : 'filter:none;transform:none;' ?>}
+body::after{content:'';position:fixed;inset:0;z-index:-1;background:rgba(3,3,3,<?= $overlay ?>);pointer-events:none}
 <?php else: ?>
 body::before{content:'';position:fixed;inset:0;z-index:-1;background:radial-gradient(ellipse at 20% 15%,rgba(var(--accent-rgb),.07),transparent 50%)}
 <?php endif; ?>
@@ -706,7 +683,6 @@ th{color:var(--accent);font-size:11px}
 .keys-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
 .key-mini{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;text-decoration:none;color:inherit;display:block;transition:.2s}
 .key-mini:hover{border-color:rgba(var(--accent-rgb),.4);transform:translateY(-2px)}
-.key-mini.aura{box-shadow:0 0 24px rgba(var(--accent-rgb),.15);border-color:rgba(var(--accent-rgb),.35)}
 .key-mini .km-top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .key-mini .km-circle{width:40px;height:40px;border-radius:50%;background:conic-gradient(from -90deg,var(--accent) var(--p),#1a1a1a 0);display:flex;align-items:center;justify-content:center}
 .key-mini .km-inner{width:30px;height:30px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600}
@@ -715,7 +691,6 @@ th{color:var(--accent);font-size:11px}
 .key-mini .km-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;color:#888}
 .key-mini .km-row span:last-child{color:#ccc}
 .kp{max-width:400px;margin:0 auto 20px;background:#0a0a0c;border:1px solid #1a1a1c;border-radius:18px;overflow:hidden;box-shadow:0 0 40px rgba(var(--accent-rgb),.08)}
-.kp.aura{box-shadow:0 0 50px rgba(var(--accent-rgb),.2);border-color:rgba(var(--accent-rgb),.35)}
 .kp-head{padding:16px;display:flex;gap:12px;border-bottom:1px solid #151517}
 .kp-avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
 .kp-circle{width:52px;height:52px;border-radius:50%;background:conic-gradient(from -90deg,var(--accent) var(--p),#1a1a1a 0);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -725,7 +700,6 @@ th{color:var(--accent);font-size:11px}
 .kp-title-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .kp-title{font-size:15px;font-weight:600}
 .kp-badge{font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(var(--accent-rgb),.12);color:var(--accent);border:1px solid rgba(var(--accent-rgb),.2)}
-.kp-badge.aura{background:var(--accent);color:#000;border:none;font-weight:600}
 .kp-sub{margin-top:4px;font-size:12px;color:#666;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .kp-sub svg{vertical-align:middle;opacity:.7}
 .kp-sub .ok{color:#fbbf24}
@@ -741,8 +715,6 @@ th{color:var(--accent);font-size:11px}
 .kp-extra{padding:0 12px 14px}
 .log-item{font-size:12px;padding:8px 0;border-bottom:1px solid #121214;display:flex;gap:10px}
 .log-item .t{color:var(--accent);white-space:nowrap;font-size:11px}
-.aura-box{background:rgba(var(--accent-rgb),.06);border:1px solid rgba(var(--accent-rgb),.2);border-radius:12px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.7;color:#aaa}
-.aura-box b{color:var(--accent)}
 @media(max-width:800px){.layout{flex-direction:column}.sidebar{width:100%;display:flex;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border)}.sidebar a{white-space:nowrap}}
 </style>
 </head>
@@ -771,19 +743,17 @@ th{color:var(--accent);font-size:11px}
 <a href="?admin&tab=settings" class="<?= $tab==='settings'?'active':'' ?>"><?= ico('settings',15) ?> Настройки</a>
 <a href="?admin&tab=logs" class="<?= $tab==='logs'?'active':'' ?>"><?= ico('list',15) ?> Логи</a>
 <a href="?admin&tab=theme" class="<?= $tab==='theme'?'active':'' ?>"><?= ico('spark',15) ?> Тема</a>
-<a href="?admin&tab=aurainfo" class="<?= $tab==='aurainfo'?'active':'' ?>"><?= ico('pulse',15) ?> AURA</a>
 </div>
 <div class="content">
 <?php if($msg):?><div class="msg"><?= $msg ?></div><?php endif; ?>
 
 <?php if ($viewKey && isset($db['keys'][$viewKey])):
   $kd=$db['keys'][$viewKey]; $used=count($kd['activations']??[]); $max=(int)($kd['max']??1);
-  if(!empty($kd['aura'])) $max += (int)($db['settings']['aura_extra_devices']??2);
   $warns=$kd['warns']??0; $ownerName=$kd['owner_name']?:'—'; $tgId=$kd['owner_tg']?:0;
-  $isAura=!empty($kd['aura']); $isNamed=!empty($kd['named']); $isFrozen=!empty($kd['is_frozen']);
+  $isNamed=!empty($kd['named']); $isFrozen=!empty($kd['is_frozen']);
   $android=$kd['android_id']?:'не привязан'; $resetLeft=$kd['reset_left']??0;
   $w=weekId(); $freezeUsed=$kd['freeze_week'][$w]??0;
-  $freezeLimit=$isAura?(int)$db['settings']['aura_freeze_per_week']:(int)$db['settings']['user_freeze_per_week'];
+  $freezeLimit=(int)($db['settings']['user_freeze_per_week']??2);
   $now=time(); $daysLeft='∞'; $expiresStr='навсегда'; $expClass='g'; $circleP=100;
   if(($kd['expires']??0)>0){$left=$kd['expires']-$now;if($left<=0){$daysLeft='0';$expiresStr='истёк';$expClass='r';$circleP=0;}else{$daysLeft=(string)ceil($left/86400);$expiresStr=date('d-m-Y H:i',$kd['expires']);$circleP=min(100,max(5,($left/(30*86400))*100));}}
   elseif(($kd['duration']??0)>0&&($kd['first_use']??0)==0){$daysLeft=(string)ceil($kd['duration']/86400);$expiresStr='после активации';}
@@ -793,7 +763,7 @@ th{color:var(--accent);font-size:11px}
   else{$status='активен';$sc='#4ade80';}
   $letter=mb_strtoupper(mb_substr($viewKey,0,1));
 ?>
-<div class="kp<?= $isAura?' aura':'' ?>">
+<div class="kp">
 <div class="kp-head">
   <div class="kp-circle" style="--p:<?= $circleP ?>%"><div class="kp-circle-in"><div class="n"><?= $daysLeft ?></div><div class="l">дней</div></div></div>
   <div style="flex:1;min-width:0">
@@ -801,7 +771,6 @@ th{color:var(--accent);font-size:11px}
       <div class="kp-avatar"><?= htmlspecialchars($letter) ?></div>
       <div class="kp-title"><?= htmlspecialchars($viewKey) ?></div>
       <span class="kp-badge"><?= $isNamed?'именной':'обычный' ?></span>
-      <?php if($isAura):?><span class="kp-badge aura">AURA</span><?php endif; ?>
       <?php if(!empty($kd['pulse'])):?><span class="kp-badge">PULSE</span><?php endif; ?>
     </div>
     <div class="kp-sub">
@@ -837,8 +806,6 @@ th{color:var(--accent);font-size:11px}
   <form method="post" style="display:contents"><input type="hidden" name="action" value="freeze_key"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>">
     <button class="kp-btn" type="submit"><?= ico('lock') ?><span><?= $isFrozen?'Разблок':'Блок' ?></span></button></form>
   <a class="kp-btn" href="?admin&tab=access&filter=<?= urlencode($viewKey) ?>"><?= ico('eye') ?><span>Логи</span></a>
-  <form method="post" style="display:contents"><input type="hidden" name="action" value="toggle_aura"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>">
-    <button class="kp-btn" type="submit"><?= ico('pulse') ?><span><?= $isAura?'AURA ✓':'AURA' ?></span></button></form>
 </div>
 <div class="kp-extra">
   <form method="post" class="form-row"><input type="hidden" name="action" value="extend_key"><input type="hidden" name="key" value="<?= htmlspecialchars($viewKey) ?>"><input type="hidden" name="days" value="7">
@@ -856,17 +823,6 @@ th{color:var(--accent);font-size:11px}
 </div>
 </div>
 <div style="text-align:center;margin-bottom:14px"><a href="?admin&tab=keys" class="btn btn-dark"><?= ico('list',14) ?> К списку</a></div>
-
-<?php elseif ($tab==='aurainfo'): ?>
-<div class="aura-box">
-<b><?= ico('pulse',16) ?> Что такое AURA</b><br>
-Вместо VIP — статус <b>AURA</b> на ключе.<br>
-• Сбросы HWID: <b><?= (int)$db['settings']['aura_hwid_resets'] ?></b> (обычно <?= (int)$db['settings']['user_hwid_resets'] ?>)<br>
-• Заморозки в неделю: <b><?= (int)$db['settings']['aura_freeze_per_week'] ?></b><br>
-• Доп. устройства: <b>+<?= (int)$db['settings']['aura_extra_devices'] ?></b><br>
-• Свечение карточки в панели<br>
-• Метка AURA в боте
-</div>
 
 <?php elseif ($tab==='github'): ?>
 <div class="card"><h2><?= ico('github') ?> GitHub sync</h2>
@@ -888,7 +844,6 @@ Repo: <code><?= htmlspecialchars($ghRepo?:'—') ?></code> · Path: <code><?= ht
 <div class="stat"><div class="num"><?= $active ?></div><div class="label">Активные</div></div>
 <div class="stat"><div class="num"><?= $onlineCount ?></div><div class="label">Онлайн</div></div>
 <div class="stat"><div class="num"><?= $frozen ?></div><div class="label">Freeze</div></div>
-<div class="stat"><div class="num"><?= $auraCount ?></div><div class="label">AURA</div></div>
 <div class="stat"><div class="num"><?= $namedCount ?></div><div class="label">Именные</div></div>
 </div>
 <div class="card"><h2><?= ico('shield') ?> Статусы</h2>
@@ -913,10 +868,7 @@ Repo: <code><?= htmlspecialchars($ghRepo?:'—') ?></code> · Path: <code><?= ht
 <div class="log-item"><span class="t"><?= date('d.m H:i',$el['time']) ?></span><span><?= htmlspecialchars($el['text']) ?></span></div>
 <?php endforeach; endif; ?>
 </div>
-<div class="tool-card"><h3><?= ico('pulse') ?> AURA / массовые</h3>
-<form method="post" class="form-row"><input type="hidden" name="action" value="mass_aura"><button class="btn btn-dark btn-sm" type="submit">AURA всем</button></form>
-<form method="post" class="form-row"><input type="hidden" name="action" value="mass_unaura"><button class="btn btn-dark btn-sm" type="submit">Снять AURA</button></form>
-<form method="post" class="form-row"><input type="hidden" name="action" value="random_aura"><button class="btn btn-dark btn-sm" type="submit">Случайный AURA</button></form>
+<div class="tool-card"><h3><?= ico('zap') ?> Массовые</h3>
 <form method="post" class="form-row"><input type="hidden" name="action" value="bulk_freeze"><button class="btn btn-dark btn-sm" type="submit">Freeze all</button></form>
 <form method="post" class="form-row"><input type="hidden" name="action" value="bulk_unfreeze"><button class="btn btn-dark btn-sm" type="submit">Unfreeze all</button></form>
 <form method="post" class="form-row"><input type="hidden" name="action" value="strip_all_devices"><button class="btn btn-dark btn-sm" type="submit">Сброс всех HWID</button></form>
@@ -971,12 +923,11 @@ $used=count($kd['activations']??[]); $max=$kd['max']??1; $now=time();
 $daysLeft='∞'; $circleP=100;
 if(($kd['expires']??0)>0){$left=$kd['expires']-$now;if($left<=0){$daysLeft='0';$circleP=0;}else{$daysLeft=(string)ceil($left/86400);$circleP=min(100,max(5,($left/(30*86400))*100));}}
 $st='#4ade80'; if(!empty($kd['is_frozen']))$st='#60a5fa'; elseif(($kd['first_use']??0)==0)$st='#facc15';
-$isA=!empty($kd['aura']);
 ?>
-<a href="?admin&view=<?= urlencode($k) ?>" class="key-mini<?= $isA?' aura':'' ?>" data-search="<?= htmlspecialchars(strtolower($k.' '.($kd['owner_name']??'').' '.($kd['owner_tg']??''))) ?>">
+<a href="?admin&view=<?= urlencode($k) ?>" class="key-mini" data-search="<?= htmlspecialchars(strtolower($k.' '.($kd['owner_name']??'').' '.($kd['owner_tg']??''))) ?>">
 <div class="km-top"><div class="km-circle" style="--p:<?= $circleP ?>%"><div class="km-inner"><?= $daysLeft ?></div></div>
 <div><div class="km-name"><?= htmlspecialchars($k) ?></div>
-<div class="km-meta"><span style="color:<?= $st ?>">●</span> <?= htmlspecialchars($kd['level']??'') ?><?= $isA?' · AURA':'' ?></div></div></div>
+<div class="km-meta"><span style="color:<?= $st ?>">●</span> <?= htmlspecialchars($kd['level']??'') ?></div></div></div>
 <div class="km-row"><span>Владелец</span><span><?= $kd['owner_tg']?:($kd['owner_name']?:'—') ?></span></div>
 <div class="km-row"><span>Входов</span><span><?= $used ?>/<?= $max ?></span></div>
 </a>
@@ -1052,9 +1003,6 @@ $isA=!empty($kd['aura']);
 <div class="form-row"><label style="width:160px">Bot welcome</label><textarea name="bot_welcome" style="width:240px"><?= htmlspecialchars($db['settings']['bot_welcome']??'') ?></textarea></div>
 <div class="form-row"><label style="width:160px">Сбросы HWID</label><input type="number" name="user_hwid_resets" value="<?= (int)$db['settings']['user_hwid_resets'] ?>" style="width:70px"></div>
 <div class="form-row"><label style="width:160px">Заморозки/нед</label><input type="number" name="user_freeze_per_week" value="<?= (int)$db['settings']['user_freeze_per_week'] ?>" style="width:70px"></div>
-<div class="form-row"><label style="width:160px">AURA сбросы</label><input type="number" name="aura_hwid_resets" value="<?= (int)$db['settings']['aura_hwid_resets'] ?>" style="width:70px"></div>
-<div class="form-row"><label style="width:160px">AURA freeze/нед</label><input type="number" name="aura_freeze_per_week" value="<?= (int)$db['settings']['aura_freeze_per_week'] ?>" style="width:70px"></div>
-<div class="form-row"><label style="width:160px">AURA +устройства</label><input type="number" name="aura_extra_devices" value="<?= (int)$db['settings']['aura_extra_devices'] ?>" style="width:70px"></div>
 <div class="form-row"><label><input type="checkbox" name="purchases_enabled" value="1" <?= !empty($db['settings']['purchases_enabled'])?'checked':'' ?>> Покупки в боте</label></div>
 <div class="form-row"><label><input type="checkbox" name="github_sync" value="1" <?= !empty($db['settings']['github_sync'])?'checked':'' ?>> GitHub auto-sync</label></div>
 <button class="btn btn-accent" type="submit" style="margin-top:10px">Сохранить</button>
@@ -1066,8 +1014,8 @@ $isA=!empty($kd['aura']);
 <div class="form-row"><label style="width:120px">URL фона</label><input type="text" name="panel_bg" value="<?= htmlspecialchars($panelBg) ?>" style="flex:1"></div>
 <div class="form-row"><label style="width:120px">Цвет</label><input type="color" name="panel_bg_color" value="<?= htmlspecialchars($panelBgColor) ?>"></div>
 <div class="form-row"><label style="width:120px">Акцент</label><input type="color" name="panel_accent" value="<?= htmlspecialchars($accent) ?>"></div>
-<div class="form-row"><label style="width:120px">Blur</label><input type="range" name="panel_blur" min="0" max="40" value="<?= $blur ?>"></div>
-<div class="form-row"><label style="width:120px">Overlay</label><input type="range" name="panel_overlay" min="0.3" max="0.95" step="0.01" value="<?= htmlspecialchars($overlay) ?>"></div>
+<div class="form-row"><label style="width:120px">Blur (0 = четкий)</label><input type="range" name="panel_blur" min="0" max="40" value="<?= $blur ?>"></div>
+<div class="form-row"><label style="width:120px">Overlay</label><input type="range" name="panel_overlay" min="0.2" max="0.95" step="0.01" value="<?= htmlspecialchars($overlay) ?>"></div>
 <button class="btn btn-accent" type="submit">Применить</button>
 </form></div>
 
@@ -1112,7 +1060,9 @@ if (isset($update['message']['successful_payment'])) {
     $newKey='PREMIUM-'.strtoupper(substr(md5(uniqid(mt_rand(),true)),0,8));
     $db['keys'][$newKey]=makeKeyData($duration,1,'premium',$chatId);
     saveDb(); addLog("Bought $newKey by $chatId");
-    sendMessage($chatId,"<b>LORI</b>\nОплата OK.\n\n<code>$newKey</code>\n\nСбросы HWID: 2\nЗаморозки: 2 / неделя");
+    $resets=(int)($db['settings']['user_hwid_resets']??2);
+    $freezes=(int)($db['settings']['user_freeze_per_week']??2);
+    sendMessage($chatId,"✅ <b>Оплата прошла успешно!</b>\n\n🔑 Ваш ключ:\n<code>$newKey</code>\n\n🔄 Сбросы HWID: <b>$resets</b>\n❄️ Заморозки: <b>$freezes</b> / неделя\n\nСохраните ключ. Управление — в «Мои ключи».");
     exit;
 }
 if (isset($update['message'])) {
@@ -1125,34 +1075,34 @@ if (isset($update['message'])) {
         saveDb(); sendMessage($chatId,"<code>$newKey</code>"); exit;
     }
     if ($text==='/start' || $text==='/menu') {
+        $welcome = $db['settings']['bot_welcome'] ?? "✨ <b>LORI</b>\nВыберите срок подписки:";
         $kb=['inline_keyboard'=>[
-            [['text'=>'1ч · 10★','callback_data'=>'buy_1_1']],
-            [['text'=>'24ч · 25★','callback_data'=>'buy_24_1']],
-            [['text'=>'7д · 75★','callback_data'=>'buy_168_1']],
-            [['text'=>'30д · 125★','callback_data'=>'buy_720_1']],
-            [['text'=>'Навсегда · 400★','callback_data'=>'buy_0_1']],
-            [['text'=>'Мои ключи','callback_data'=>'my_keys'],['text'=>'AURA','callback_data'=>'aura_info']],
-            [['text'=>'Лимиты','callback_data'=>'limits_info']]
+            [['text'=>'⚡ 1 час  —  10 ★','callback_data'=>'buy_1_1']],
+            [['text'=>'🌙 24 часа  —  25 ★','callback_data'=>'buy_24_1']],
+            [['text'=>'📅 7 дней  —  75 ★','callback_data'=>'buy_168_1']],
+            [['text'=>'💎 30 дней  —  125 ★','callback_data'=>'buy_720_1']],
+            [['text'=>'♾️ Навсегда  —  400 ★','callback_data'=>'buy_0_1']],
+            [['text'=>'🔑 Мои ключи','callback_data'=>'my_keys'],['text'=>'ℹ️ Лимиты','callback_data'=>'limits_info']]
         ]];
-        if($isAdmin) $kb['inline_keyboard'][]=[['text'=>'Админ','callback_data'=>'admin_panel']];
-        sendMessage($chatId, $db['settings']['bot_welcome'] ?? "<b>LORI</b>\nВыберите срок:", $kb);
+        if($isAdmin) $kb['inline_keyboard'][]=[['text'=>'🛠 Админ-панель','callback_data'=>'admin_panel']];
+        sendMessage($chatId, $welcome, $kb);
     }
 }
 if (isset($update['callback_query'])) {
     $cq=$update['callback_query']; $chatId=(int)$cq['message']['chat']['id']; $data=$cq['data']; $msgId=$cq['message']['message_id']; $cqId=$cq['id']; $isAdmin=($chatId===$adminId);
     if (strpos($data,'buy_')===0) {
-        if(empty($db['settings']['purchases_enabled'])){answerCallback($cqId,'Выкл',true);exit;}
-        $h=(int)explode('_',$data)[1]; $m=[1=>10,24=>25,168=>75,720=>125,0=>400];
-        sendInvoice($chatId,'LORI','Access',"sub_{$h}_1",$m[$h]??25); answerCallback($cqId); exit;
-    }
-    if ($data==='aura_info') {
-        answerCallback($cqId);
-        sendMessage($chatId,"<b>AURA</b>\n\n• ".((int)$db['settings']['aura_hwid_resets'])." сбросов HWID\n• ".((int)$db['settings']['aura_freeze_per_week'])." заморозок / неделя\n• +".((int)$db['settings']['aura_extra_devices'])." устройства\n• Свечение в панели");
-        exit;
+        if(empty($db['settings']['purchases_enabled'])){answerCallback($cqId,'Покупки временно отключены',true);exit;}
+        $h=(int)explode('_',$data)[1];
+        $m=[1=>10,24=>25,168=>75,720=>125,0=>400];
+        $titles=[1=>'1 час',24=>'24 часа',168=>'7 дней',720=>'30 дней',0=>'Навсегда'];
+        $title='LORI · '.($titles[$h]??'Access');
+        $desc='Подписка LORI на '.($titles[$h]??'выбранный срок');
+        sendInvoice($chatId,$title,$desc,"sub_{$h}_1",$m[$h]??25);
+        answerCallback($cqId); exit;
     }
     if ($data==='limits_info') {
         answerCallback($cqId);
-        sendMessage($chatId,"<b>Лимиты</b>\n\nСброс HWID: <b>".((int)$db['settings']['user_hwid_resets'])."</b> на весь срок\nЗаморозка: <b>".((int)$db['settings']['user_freeze_per_week'])."</b> / неделя");
+        sendMessage($chatId,"ℹ️ <b>Лимиты ключа</b>\n\n🔄 Сброс HWID: <b>".((int)$db['settings']['user_hwid_resets'])."</b> на весь срок\n❄️ Заморозка: <b>".((int)$db['settings']['user_freeze_per_week'])."</b> раз в неделю\n\nИспользуйте кнопки в «Мои ключи».");
         exit;
     }
     if ($data==='my_keys') {
@@ -1160,20 +1110,18 @@ if (isset($update['callback_query'])) {
         foreach($db['keys'] as $k=>$kd){
             if(($kd['owner_tg']??0)!=$chatId) continue;
             $f=true; $used=count($kd['activations']??[]); $max=$kd['max']??1;
-            if(!empty($kd['aura'])) $max+=(int)$db['settings']['aura_extra_devices'];
             $resetLeft=$kd['reset_left']??0;
             $w=weekId(); $fu=$kd['freeze_week'][$w]??0;
-            $fl=!empty($kd['aura'])?(int)$db['settings']['aura_freeze_per_week']:(int)$db['settings']['user_freeze_per_week'];
-            $st=!empty($kd['is_frozen'])?'Заморожен':((($kd['expires']??0)==0)?'∞':ceil(max(0,$kd['expires']-time())/86400).'д');
-            $aura=!empty($kd['aura'])?' · AURA':'';
-            sendMessage($chatId,"<b>LORI</b>\n<code>$k</code>$aura\n$st · $used/$max\nСбросы: $resetLeft · Freeze: $fu/$fl",[
+            $fl=(int)($db['settings']['user_freeze_per_week']??2);
+            $st=!empty($kd['is_frozen'])?'❄️ Заморожен':((($kd['expires']??0)==0)?'♾️ ∞':('⏳ '.ceil(max(0,$kd['expires']-time())/86400).'д'));
+            sendMessage($chatId,"🔑 <b>Ваш ключ</b>\n<code>$k</code>\n\n$st · входов $used/$max\nСбросы: <b>$resetLeft</b> · Freeze: <b>$fu/$fl</b>",[
                 'inline_keyboard'=>[
-                    [['text'=>"Сброс HWID ($resetLeft)",'callback_data'=>'user_reset_'.$k]],
-                    [['text'=>!empty($kd['is_frozen'])?"Разморозить ($fu/$fl)":"Заморозить ($fu/$fl)",'callback_data'=>'user_freeze_'.$k]]
+                    [['text'=>"🔄 Сброс HWID ($resetLeft)",'callback_data'=>'user_reset_'.$k]],
+                    [['text'=>!empty($kd['is_frozen'])?"🔓 Разморозить ($fu/$fl)":"❄️ Заморозить ($fu/$fl)",'callback_data'=>'user_freeze_'.$k]]
                 ]
             ]);
         }
-        if(!$f) sendMessage($chatId,'Нет ключей');
+        if(!$f) sendMessage($chatId,'У вас пока нет ключей.\nКупите подписку в главном меню.');
         answerCallback($cqId); exit;
     }
     if (strpos($data,'user_reset_')===0) {
