@@ -2903,3 +2903,243 @@ function playSound(){
     exit;
 }
 
+// ============================================================
+// 9. TELEGRAM BOT
+// ============================================================
+$content = file_get_contents('php://input');
+$update = json_decode($content, true);
+if (!$update) {
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>LORI</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;color:#6366f1;font-family:Inter,system-ui;letter-spacing:6px;font-weight:800;font-size:32px}</style></head><body>LORI</body></html>';
+    exit;
+}
+
+function tgRequest($method,$data){global $botToken;$opts=['http'=>['header'=>"Content-Type: application/json\r\n",'method'=>'POST','content'=>json_encode($data,JSON_UNESCAPED_UNICODE),'ignore_errors'=>true]];return @file_get_contents("https://api.telegram.org/bot$botToken/$method",false,stream_context_create($opts));}
+function sendMessage($chat_id,$text,$kb=null){$d=['chat_id'=>$chat_id,'text'=>$text,'parse_mode'=>'HTML','disable_web_page_preview'=>true];if($kb)$d['reply_markup']=$kb;return tgRequest('sendMessage',$d);}
+function editMessage($chat_id,$msg_id,$text,$kb=null){$d=['chat_id'=>$chat_id,'message_id'=>$msg_id,'text'=>$text,'parse_mode'=>'HTML'];if($kb)$d['reply_markup']=$kb;return tgRequest('editMessageText',$d);}
+function answerCallback($cq_id,$text='',$alert=false){tgRequest('answerCallbackQuery',['callback_query_id'=>$cq_id,'text'=>$text,'show_alert'=>$alert]);}
+function sendInvoice($chat_id,$title,$desc,$payload,$stars){tgRequest('sendInvoice',['chat_id'=>$chat_id,'title'=>$title,'description'=>$desc,'payload'=>$payload,'currency'=>'XTR','prices'=>[['label'=>'Stars','amount'=>$stars]]]);}
+
+if (isset($update['pre_checkout_query'])) { tgRequest('answerPreCheckoutQuery',['pre_checkout_query_id'=>$update['pre_checkout_query']['id'],'ok'=>true]); exit; }
+if (isset($update['message']['successful_payment'])) {
+    if (empty($db['settings']['purchases_enabled'])) exit;
+    $chatId=$update['message']['chat']['id']; $parts=explode('_',$update['message']['successful_payment']['invoice_payload']);
+    $hours=(int)($parts[1]??24); $duration=$hours===0?0:$hours*3600;
+    $newKey=generateKey('premium');
+    $db['keys'][$newKey]=makeKeyData($duration,1,'premium',$chatId);
+    saveDb(); addLog("Bought $newKey by $chatId");
+    $db['stats']['purchases']=($db['stats']['purchases']??0)+1;
+    $db['stats']['stars']=($db['stats']['stars']??0)+($update['message']['successful_payment']['total_amount']??0);
+    saveDb();
+    sendMessage($chatId,"<b>LORI</b>\n✅ Оплата OK.\n\n<code>$newKey</code>\n\nСбросы HWID: ".($db['settings']['user_hwid_resets']??2)."\nЗаморозки: ".($db['settings']['user_freeze_per_week']??2)." / неделя");
+    if (!empty($db['settings']['telegram_notify_admin'])) {
+        @file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$adminId&text=".urlencode("💰 Новая покупка\nКлюч: $newKey\nЮзер: $chatId"));
+    }
+    exit;
+}
+if (isset($update['message'])) {
+    $chatId=(int)$update['message']['chat']['id'];
+    $text=trim($update['message']['text']??'');
+    $isAdmin=($chatId===$adminId);
+    
+    if ($isAdmin && strpos($text,'/gen ')===0) {
+        $a=explode(' ',$text);
+        $hours=(int)($a[1]??24);
+        $max=(int)($a[2]??1);
+        $level=$a[3]??'premium';
+        $name=$a[4]??'';
+        $duration=$hours===0?0:$hours*3600;
+        if($name){
+            if(isset($db['keys'][$name])){sendMessage($chatId,'Занято');exit;}
+            $db['keys'][$name]=makeKeyData($duration,$max,$level,0,$name,true);
+            $newKey=$name;
+        } else {
+            $newKey=generateKey($level);
+            $db['keys'][$newKey]=makeKeyData($duration,$max,$level);
+        }
+        saveDb(); sendMessage($chatId,"<code>$newKey</code>"); exit;
+    }
+    
+    if ($text==='/start' || $text==='/menu') {
+        $kb=['inline_keyboard'=>[
+            [['text'=>'1ч · 10★','callback_data'=>'buy_1_1']],
+            [['text'=>'24ч · 25★','callback_data'=>'buy_24_1']],
+            [['text'=>'7д · 75★','callback_data'=>'buy_168_1']],
+            [['text'=>'30д · 125★','callback_data'=>'buy_720_1']],
+            [['text'=>'Навсегда · 400★','callback_data'=>'buy_0_1']],
+            [['text'=>'🔑 Мои ключи','callback_data'=>'my_keys'],['text'=>'✨ AURA','callback_data'=>'aura_info']],
+            [['text'=>'📊 Статистика','callback_data'=>'stats_info'],['text'=>'❓ Лимиты','callback_data'=>'limits_info']]
+        ]];
+        if($isAdmin) $kb['inline_keyboard'][]=[['text'=>'⚙️ Админ','callback_data'=>'admin_panel']];
+        sendMessage($chatId, $db['settings']['bot_welcome'] ?? "<b>LORI</b>\nВыберите срок:", $kb);
+    }
+    
+    if ($text==='/stats' && $isAdmin) {
+        $total=count($db['keys']);
+        $active=0;
+        foreach($db['keys'] as $kd) if(keyStatus($kd)==='active') $active++;
+        sendMessage($chatId,"<b>📊 Статистика</b>\n\nВсего ключей: $total\nАктивных: $active\nОнлайн: ".count($db['online'])."\nПокупок: ".($db['stats']['purchases']??0)."\nЗвёзд: ".($db['stats']['stars']??0));
+        exit;
+    }
+}
+if (isset($update['callback_query'])) {
+    $cq=$update['callback_query'];
+    $chatId=(int)$cq['message']['chat']['id'];
+    $data=$cq['data'];
+    $msgId=$cq['message']['message_id'];
+    $cqId=$cq['id'];
+    $isAdmin=($chatId===$adminId);
+    
+    if (strpos($data,'buy_')===0) {
+        if(empty($db['settings']['purchases_enabled'])){answerCallback($cqId,'Покупки выкл',true);exit;}
+        $h=(int)explode('_',$data)[1];
+        $m=[1=>10,24=>25,168=>75,720=>125,0=>400];
+        sendInvoice($chatId,'LORI','Access',"sub_{$h}_1",$m[$h]??25);
+        answerCallback($cqId); exit;
+    }
+    if ($data==='aura_info') {
+        answerCallback($cqId);
+        sendMessage($chatId,"<b>✨ AURA</b>\n\nСкоро...");
+        exit;
+    }
+    if ($data==='stats_info') {
+        answerCallback($cqId);
+        $total=count($db['keys']);
+        $active=0;
+        foreach($db['keys'] as $kd) if(keyStatus($kd)==='active') $active++;
+        sendMessage($chatId,"<b>📊 Статистика</b>\n\nВсего ключей: $total\nАктивных: $active");
+        exit;
+    }
+    if ($data==='limits_info') {
+        answerCallback($cqId);
+        sendMessage($chatId,"<b>❓ Лимиты</b>\n\nСброс HWID: <b>".((int)$db['settings']['user_hwid_resets'])."</b>\nЗаморозка: <b>".((int)$db['settings']['user_freeze_per_week'])."</b> / неделя");
+        exit;
+    }
+    if ($data==='my_keys') {
+        $f=false;
+        foreach($db['keys'] as $k=>$kd){
+            if(($kd['owner_tg']??0)!=$chatId) continue;
+            $f=true;
+            $used=count($kd['activations']??[]);
+            $max=$kd['max']??1;
+            $resetLeft=$kd['reset_left']??0;
+            $w=weekId();
+            $fu=$kd['freeze_week'][$w]??0;
+            $fl=(int)$db['settings']['user_freeze_per_week'];
+            $st=!empty($kd['is_frozen'])?'Заморожен':((($kd['expires']??0)==0)?'∞':daysLeft($kd).'д');
+            
+            $kb=['inline_keyboard'=>[
+                [['text'=>"🔄 Сброс HWID ($resetLeft)",'callback_data'=>'user_reset_'.$k]],
+                [['text'=>(!empty($kd['is_frozen'])?"🔓 Разморозить":"🔒 Заморозить")." ($fu/$fl)",'callback_data'=>'user_freeze_'.$k]]
+            ]];
+            sendMessage($chatId,"<b>LORI</b>\n<code>$k</code>\n$st · $used/$max\nСбросы: $resetLeft · Freeze: $fu/$fl", $kb);
+        }
+        if(!$f) sendMessage($chatId,'У вас нет ключей');
+        answerCallback($cqId); exit;
+    }
+    if (strpos($data,'user_reset_')===0) {
+        $key=str_replace('user_reset_','',$data);
+        if(isset($db['keys'][$key])&&($db['keys'][$key]['owner_tg']??0)==$chatId){
+            if(empty($db['settings']['allow_self_reset'])){answerCallback($cqId,'Функция отключена',true);exit;}
+            if(($db['keys'][$key]['reset_left']??0)>0){
+                $db['keys'][$key]['activations']=[];
+                $db['keys'][$key]['reset_left']--;
+                saveDb();
+                answerCallback($cqId,'OK, осталось '.$db['keys'][$key]['reset_left']);
+            } else answerCallback($cqId,'Лимит исчерпан',true);
+        }
+        exit;
+    }
+    if (strpos($data,'user_freeze_')===0) {
+        $key=str_replace('user_freeze_','',$data);
+        if(isset($db['keys'][$key])&&($db['keys'][$key]['owner_tg']??0)==$chatId){
+            if(empty($db['settings']['allow_self_freeze'])){answerCallback($cqId,'Функция отключена',true);exit;}
+            $kd=&$db['keys'][$key];
+            if(!empty($kd['is_frozen'])){
+                $kd['is_frozen']=false;
+                saveDb();
+                answerCallback($cqId,'Разморожен');
+            } else {
+                if(!canUserFreeze($kd)){answerCallback($cqId,'Лимит на неделю',true);exit;}
+                $kd['is_frozen']=true;
+                registerUserFreeze($kd);
+                saveDb();
+                answerCallback($cqId,'Заморожен');
+            }
+        }
+        exit;
+    }
+    if (!$isAdmin) { answerCallback($cqId,'Нет доступа',true); exit; }
+    if ($data==='admin_panel') {
+        editMessage($chatId,$msgId,"<b>⚙️ LORI Admin</b>\nКлючи: ".count($db['keys']),['inline_keyboard'=>[
+            [['text'=>'🔑 Ключи','callback_data'=>'adm_keys']],
+            [['text'=>'💀 Killswitch','callback_data'=>'toggle_kill'],['text'=>'🔒 Freeze','callback_data'=>'toggle_gfreeze']]
+        ]]);
+        answerCallback($cqId); exit;
+    }
+    if ($data==='adm_keys'||strpos($data,'adm_keys_')===0) {
+        $page=strpos($data,'adm_keys_')===0?(int)str_replace('adm_keys_','',$data):0;
+        $keys=array_keys($db['keys']);
+        $per=8;
+        $total=count($keys);
+        $pages=max(1,ceil($total/$per));
+        $slice=array_slice($keys,$page*$per,$per);
+        $kb=['inline_keyboard'=>[]];
+        foreach($slice as $k) $kb['inline_keyboard'][]=[['text'=>$k,'callback_data'=>'k_view_'.$k]];
+        $nav=[];
+        if($page>0)$nav[]=['text'=>'‹','callback_data'=>'adm_keys_'.($page-1)];
+        $nav[]=['text'=>($page+1)."/$pages",'callback_data'=>'noop'];
+        if($page<$pages-1)$nav[]=['text'=>'›','callback_data'=>'adm_keys_'.($page+1)];
+        if($nav)$kb['inline_keyboard'][]=$nav;
+        $kb['inline_keyboard'][]=[['text'=>'Назад','callback_data'=>'admin_panel']];
+        editMessage($chatId,$msgId,"Ключи ($total)",$kb);
+        answerCallback($cqId); exit;
+    }
+    if (strpos($data,'k_view_')===0) {
+        $key=str_replace('k_view_','',$data);
+        if(!isset($db['keys'][$key])){answerCallback($cqId,'?',true);exit;}
+        $kd=$db['keys'][$key];
+        editMessage($chatId,$msgId,"<code>$key</code>\n".(count($kd['activations']??[])).'/'.($kd['max']??1),['inline_keyboard'=>[
+            [['text'=>'🔄 Сброс HWID','callback_data'=>'k_rhwid_'.$key],['text'=>'🔒 Freeze','callback_data'=>'k_freeze_'.$key]],
+            [['text'=>'Назад','callback_data'=>'adm_keys']]
+        ]]);
+        answerCallback($cqId); exit;
+    }
+    if (strpos($data,'k_rhwid_')===0){
+        $key=str_replace('k_rhwid_','',$data);
+        if(isset($db['keys'][$key])){
+            $db['keys'][$key]['activations']=[];
+            saveDb();
+            answerCallback($cqId,'OK');
+        }
+        exit;
+    }
+    if (strpos($data,'k_freeze_')===0){
+        $key=str_replace('k_freeze_','',$data);
+        if(isset($db['keys'][$key])){
+            $db['keys'][$key]['is_frozen']=empty($db['keys'][$key]['is_frozen']);
+            saveDb();
+            answerCallback($cqId,'OK');
+        }
+        exit;
+    }
+    if ($data==='toggle_kill'){
+        if($db['settings']['status']==='killswitch'){
+            $db['settings']['status']='online';
+            $db['settings']['emergency_msg']='';
+        } else {
+            $db['settings']['status']='killswitch';
+            $db['settings']['emergency_msg']='Stopped';
+        }
+        saveDb();
+        answerCallback($cqId,'OK');
+        exit;
+    }
+    if ($data==='toggle_gfreeze'){
+        $db['settings']['global_freeze']=empty($db['settings']['global_freeze']);
+        saveDb();
+        answerCallback($cqId,'OK');
+        exit;
+    }
+    if ($data==='noop'){answerCallback($cqId);exit;}
+}
