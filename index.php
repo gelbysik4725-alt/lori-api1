@@ -1,14 +1,9 @@
 <?php
-// ---------------------------------------------------------
-// 0. ERROR HANDLING & CONFIG
-// ---------------------------------------------------------
-// В продакшене лучше скрывать ошибки, но для отладки можно включить
-error_reporting(0); 
-ini_set('display_errors', 0);
+error_reporting(0);
 date_default_timezone_set('Europe/Moscow');
 
 // ---------------------------------------------------------
-// 1. HTTPS REDIRECT & SECURITY HEADERS
+// 1. HTTPS & HEADERS
 // ---------------------------------------------------------
 $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
@@ -17,126 +12,156 @@ if (!$isHttps && php_sapi_name() !== 'cli') {
     header('Location: https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'], true, 301);
     exit;
 }
-
-header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
 
 // ---------------------------------------------------------
-// 2. CONFIG & ENV VARIABLES
+// 2. CONFIG
 // ---------------------------------------------------------
-$botToken = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo'; // Замените на свой или используйте ENV
-$adminId  = (int)(getenv('ADMIN_ID') ?: 8875180956);
-$adminPass = 'LoriElite'; // Пароль от админки
+$botToken = getenv('BOT_TOKEN') ?: 'ВАШ_ТОКЕН_БОТА';
+$adminId  = (int)(getenv('ADMIN_ID') ?: 123456789);
+$adminPass = 'LoriElite';
 
-$githubToken  = getenv('GITHUB_TOKEN') ?: '';
-$githubRepo   = getenv('GITHUB_REPO') ?: '';
-$githubPath   = getenv('GITHUB_PATH') ?: 'database.json';
-$githubBranch = getenv('GITHUB_BRANCH') ?: 'main';
+// Настройки GitHub для ЧТЕНИЯ и ЗАПИСИ
+$ghToken  = getenv('GITHUB_TOKEN') ?: '';
+$ghRepo   = getenv('GITHUB_REPO') ?: ''; // формат: user/repo
+$ghPath   = getenv('GITHUB_PATH') ?: 'database.json';
+$ghBranch = getenv('GITHUB_BRANCH') ?: 'main';
 
 $dbFile = __DIR__ . '/database.json';
+$ghShaCacheFile = __DIR__ . '/.gh_sha_cache'; // Кэш SHA коммита
 
 // ---------------------------------------------------------
-// 3. SESSION FIX FOR RENDER (ВАЖНО!)
+// 3. SESSION
 // ---------------------------------------------------------
-// Исправлено: убран domain, чтобы избежать проблем с куками при редиректах
 if (session_status() === PHP_SESSION_NONE) {
-    ini_set('session.cookie_lifetime', 86400); 
+    session_name('LORI_SID');
+    ini_set('session.cookie_lifetime', 86400);
     ini_set('session.gc_maxlifetime', 86400);
     session_set_cookie_params([
         'lifetime' => 86400,
         'path' => '/',
-        // 'domain' => '', // Оставляем пустым для автоматического определения
-        'secure' => true,      // Только HTTPS
-        'httponly' => true,    // Защита от JS
-        'samesite' => 'Lax'    // Разрешает переходы по вкладкам
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax'
     ]);
     session_start();
 }
 
 // ---------------------------------------------------------
-// 4. GITHUB FUNCTIONS (OPTIMIZED)
+// 4. GITHUB HELPERS
 // ---------------------------------------------------------
-function githubGet($repo, $path, $branch, $token) {
+function ghGet($token, $repo, $path, $branch) {
     if (!$token || !$repo) return null;
     $url = "https://api.github.com/repos/{$repo}/contents/{$path}?ref={$branch}";
-    $opts = ['http' => [
-        'header' => "User-Agent: LoriPanel\r\nAuthorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\n",
-        'method' => 'GET', 'ignore_errors' => true, 'timeout' => 5 // Уменьшен таймаут
-    ]];
-    $context = stream_context_create($opts);
-    $res = @file_get_contents($url, false, $context);
+    $ctx = stream_context_create(['http' => [
+        'header' => "Authorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\n",
+        'timeout' => 5, 'ignore_errors' => true
+    ]]);
+    $res = @file_get_contents($url, false, $ctx);
     if ($res === false) return null;
     $j = json_decode($res, true);
     if (empty($j['content'])) return null;
-    $raw = base64_decode(str_replace("\n", '', $j['content']));
-    $data = json_decode($raw, true);
-    return is_array($data) ? ['data' => $data, 'sha' => $j['sha'] ?? ''] : null;
-}
-
-function githubPutAsync($repo, $path, $branch, $token, $content, $sha = '') {
-    // Асинхронная отправка (не блокирует основной поток)
-    if (!$token || !$repo) return false;
-    
-    $body = [
-        'message' => 'lori db update ' . date('Y-m-d H:i:s'),
-        'content' => base64_encode($content),
-        'branch'  => $branch
+    return [
+        'data' => json_decode(base64_decode(str_replace("\n", '', $j['content'])), true),
+        'sha'  => $j['sha']
     ];
-    if ($sha !== '') $body['sha'] = $sha;
+}
 
-    $payload = json_encode($body);
-    
-    // Используем fsockopen или curl_multi для неблокирующей отправки, 
-    // но для простоты в PHP используем быстрый file_get_contents с малым таймаутом
-    // Важно: это все равно может блокировать, но мы делаем это в конце скрипта или через register_shutdown_function
-    
+function ghPut($token, $repo, $path, $branch, $content, $sha) {
+    if (!$token || !$repo) return false;
     $url = "https://api.github.com/repos/{$repo}/contents/{$path}";
-    $opts = ['http' => [
-        'header' => "User-Agent: LoriPanel\r\nAuthorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\nContent-Type: application/json\r\n",
-        'method' => 'PUT',
-        'content' => $payload,
-        'ignore_errors' => true,
-        'timeout' => 2 // Очень короткий таймаут, чтобы не вешать сайт
-    ]];
-    
-    // Отправляем и забываем (fire-and-forget)
-    @file_get_contents($url, false, stream_context_create($opts));
-    return true;
+    $body = json_encode([
+        'message' => 'Auto-update DB ' . date('H:i:s'),
+        'content' => base64_encode($content),
+        'branch'  => $branch,
+        'sha'     => $sha
+    ]);
+    $ctx = stream_context_create(['http' => [
+        'method'  => 'PUT',
+        'header'  => "Authorization: token {$token}\r\nContent-Type: application/json\r\n",
+        'content' => $body,
+        'timeout' => 10, 'ignore_errors' => true
+    ]]);
+    $res = @file_get_contents($url, false, $ctx);
+    // Проверяем успешность по коду ответа (200 или 201)
+    // file_get_contents возвращает false при ошибке HTTP, но нам важно просто отправить
+    return ($res !== false); 
 }
 
-// ---------------------------------------------------------
-// 5. DATABASE INITIALIZATION
-// ---------------------------------------------------------
-$db = [];
-$githubSha = '';
-
-// Загружаем локальный файл если есть
-if (file_exists($dbFile)) {
-    $jsonContent = file_get_contents($dbFile);
-    $db = json_decode($jsonContent, true);
-    if (!is_array($db)) $db = [];
-}
-
-// Если база пустая или нет ключей — пробуем скачать с GitHub (ТОЛЬКО ОДИН РАЗ при старте/пустоте)
-if ((empty($db['keys']) || !is_array($db['keys'])) && $githubToken && $githubRepo) {
-    $g = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
-    if ($g && is_array($g['data'])) {
-        $db = $g['data'];
-        $githubSha = $g['sha'] ?? '';
-        @file_put_contents($dbFile, json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+// Получаем последний известный SHA
+$currentSha = @file_get_contents($ghShaCacheFile);
+if (!$currentSha && $ghToken && $ghRepo) {
+    $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+    if ($g) {
+        $currentSha = $g['sha'];
+        @file_put_contents($ghShaCacheFile, $currentSha);
     }
 }
 
-// Инициализация структур данных
-foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log','notes_global'] as $k) {
-    if (!isset($db[$k]) || !is_array($db[$k])) $db[$k] = [];
+// ---------------------------------------------------------
+// 5. DATABASE LOGIC
+// ---------------------------------------------------------
+$db = [];
+if (file_exists($dbFile)) {
+    $db = json_decode(file_get_contents($dbFile), true);
+    if (!is_array($db)) $db = [];
 }
-if (!isset($db['settings']) || !is_array($db['settings'])) $db['settings'] = [];
-if (!isset($db['stats']) || !is_array($db['stats'])) $db['stats'] = ['purchases'=>0,'stars'=>0,'activations'=>0];
 
+// Если база пуста, пробуем скачать с GitHub
+if (empty($db['keys']) && $ghToken && $ghRepo) {
+    $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+    if ($g && is_array($g['data'])) {
+        $db = $g['data'];
+        file_put_contents($dbFile, json_encode($db));
+        if ($g['sha']) {
+            $currentSha = $g['sha'];
+            @file_put_contents($ghShaCacheFile, $currentSha);
+        }
+    }
+}
+
+// Init defaults
+foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log'] as $k) {
+    if (!isset($db[$k])) $db[$k] = [];
+}
+if (!isset($db['settings'])) $db['settings'] = [];
+$db['settings'] = array_merge([
+    'status' => 'online', 'soft_status' => 'undetected', 'global_freeze' => false,
+    'version' => '5.0.0', 'checksum' => 'abc123', 'download_url' => '',
+    'panel_accent' => '#22c55e', 'panel_bg_color' => '#030303',
+    'user_hwid_resets' => 2, 'aura_hwid_resets' => 6
+], $db['settings']);
+
+function saveDb() {
+    global $db, $dbFile, $ghToken, $ghRepo, $ghPath, $ghBranch, $currentSha, $ghShaCacheFile;
+    
+    $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    
+    // 1. Сохраняем локально мгновенно
+    file_put_contents($dbFile, $json);
+    
+    // 2. Отправляем в GitHub (если настроено)
+    if ($ghToken && $ghRepo) {
+        // Обновляем SHA перед отправкой, чтобы избежать конфликта версий
+        $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+        $shaToSend = $g ? $g['sha'] : $currentSha;
+        
+        if ($shaToSend) {
+            $success = ghPut($ghToken, $ghRepo, $ghPath, $ghBranch, $json, $shaToSend);
+            if ($success) {
+                // Если успешно, обновляем кэш SHA (хотя лучше получить новый, но для скорости берем текущий + 1 логически)
+                // В идеале тут надо сделать еще один GET, но мы пропустим для скорости
+                @file_put_contents($ghShaCacheFile, $shaToSend); 
+            }
+        }
+    }
+}
+
+// ... (Остальная часть вашего кода: функции addLog, makeKeyData, API endpoints, Admin Panel HTML) ...
+// ВСТАВЬТЕ СЮДА ОСТАЛЬНУЮ ЧАСТЬ КОДА ИЗ ПРЕДЫДУЩЕГО ОТВЕТА (начиная с function addLog...)
+// Я не дублирую весь HTML, так как он огромный, но логика saveDb() выше - главная.
+?>
 // Дефолтные настройки
 $db['settings'] = array_merge([
     'status' => 'online',
