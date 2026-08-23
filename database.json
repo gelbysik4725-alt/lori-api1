@@ -277,7 +277,7 @@
         "broadcast": "",
         "panel_bg": "",
         "panel_bg_color": "#000000",
-        "panel_accent": "#22c55e",
+        "panel_accent": "#ffffff",
         "panel_overlay": 0.75,
         "panel_blur": 12,
         "bot_welcome": "LORI\nВыберите срок:",
