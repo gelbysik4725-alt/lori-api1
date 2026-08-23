@@ -1,1 +1,39 @@
-{}
+{
+    "keys": [],
+    "blacklist": [],
+    "logs": [],
+    "online": [],
+    "login_log": [],
+    "extend_log": [],
+    "access_log": [],
+    "notes_global": [],
+    "settings": {
+        "status": "online",
+        "soft_status": "undetected",
+        "global_freeze": false,
+        "version": "5.0.0",
+        "checksum": "5c8714cf5eb4010c2cad5b14ac476f3f3f695d26",
+        "download_url": "https:\/\/example.com\/script.lua",
+        "emergency_msg": "",
+        "broadcast": "",
+        "panel_bg": "",
+        "panel_bg_color": "#030303",
+        "panel_accent": "#22c55e",
+        "panel_overlay": "0.75",
+        "panel_blur": "12",
+        "bot_welcome": "LORI\nВыберите срок:",
+        "purchases_enabled": true,
+        "user_hwid_resets": 2,
+        "user_freeze_per_week": 2,
+        "aura_hwid_resets": 6,
+        "aura_freeze_per_week": 6,
+        "aura_extra_devices": 2,
+        "maintenance_msg": "Сервер на обслуживании",
+        "github_sync": true
+    },
+    "stats": {
+        "purchases": 0,
+        "stars": 0,
+        "activations": 0
+    }
+}
