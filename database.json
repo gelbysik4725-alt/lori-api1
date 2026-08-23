@@ -52,6 +52,10 @@
     "blacklist": [],
     "logs": [
         {
+            "time": 1787507478,
+            "text": "Admin login from 31.76.252.75"
+        },
+        {
             "time": 1787503406,
             "text": "HWID reset PREMIUM-A2505A60"
         },
@@ -66,6 +70,11 @@
     ],
     "online": [],
     "login_log": [
+        {
+            "time": 1787507478,
+            "ip": "31.76.252.75",
+            "ok": true
+        },
         {
             "time": 1787503761,
             "ip": "179.254.114.251",
@@ -200,15 +209,57 @@
         "purchases_enabled": true,
         "user_hwid_resets": 2,
         "user_freeze_per_week": 2,
+        "maintenance_msg": "Сервер на обслуживании",
+        "github_sync": true,
+        "theme_mode": "dark",
+        "auto_cleanup": true,
+        "max_login_attempts": 5,
+        "share_detect_limit": 5,
+        "notify_new_activation": true,
+        "grace_period_hours": 0,
+        "warning_days_before": 3,
+        "default_level": "premium",
+        "default_max_devices": 1,
+        "default_hours": 24,
+        "key_prefix": "LORI",
+        "show_stats_in_bot": true,
+        "bot_language": "ru",
+        "allow_self_reset": true,
+        "allow_self_freeze": true,
+        "enable_promo": true,
+        "enable_achievements": true,
+        "enable_folders": true,
+        "enable_tags": true,
+        "enable_qr": true,
+        "enable_export": true,
+        "compact_mode": false,
+        "sounds_enabled": true,
+        "show_online": true,
+        "show_access_log": true,
+        "show_admin_history": true,
+        "enable_whitelist": false,
+        "whitelist_only": false,
+        "auto_ban_on_share": false,
+        "ip_limit_per_key": 0,
+        "country_block": [],
+        "discord_webhook": "",
+        "telegram_notify_admin": true,
+        "maintenance_mode": false,
+        "killswitch": false,
+        "demo_mode": false,
         "aura_hwid_resets": 6,
         "aura_freeze_per_week": 6,
-        "aura_extra_devices": 2,
-        "maintenance_msg": "Сервер на обслуживании",
-        "github_sync": true
+        "aura_extra_devices": 2
     },
     "stats": {
         "purchases": 0,
         "stars": 0,
         "activations": 0
-    }
+    },
+    "whitelist": [],
+    "admin_history": [],
+    "folders": [],
+    "tags": [],
+    "promo_codes": [],
+    "achievements": []
 }
