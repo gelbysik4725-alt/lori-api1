@@ -111,6 +111,11 @@
     "online": [],
     "login_log": [
         {
+            "time": 1787516054,
+            "ip": "31.76.252.75",
+            "ok": true
+        },
+        {
             "time": 1787509398,
             "ip": "31.76.252.75",
             "ok": true
@@ -281,6 +286,7 @@
         "panel_overlay": 0.75,
         "panel_blur": 12,
         "bot_welcome": "LORI\nВыберите срок:",
+        "bot_photo_url": "https:\/\/images.unsplash.com\/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
         "purchases_enabled": true,
         "user_hwid_resets": 2,
         "user_freeze_per_week": 2,
