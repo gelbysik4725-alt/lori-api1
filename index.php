@@ -2,19 +2,27 @@
 error_reporting(0);
 date_default_timezone_set('Europe/Moscow');
 
+// ---------------------------------------------------------
+// 1. HTTPS REDIRECT & SECURITY HEADERS
+// ---------------------------------------------------------
 $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
 if (!$isHttps && php_sapi_name() !== 'cli') {
     header('Location: https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'], true, 301);
     exit;
 }
+
 header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 
+// ---------------------------------------------------------
+// 2. CONFIG & ENV VARIABLES
+// ---------------------------------------------------------
 $botToken = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo';
 $adminId  = (int)(getenv('ADMIN_ID') ?: 8875180956);
-$adminPass = 'LoriElite';
+$adminPass = 'LoriElite'; // Пароль от админки
 
 $githubToken  = getenv('GITHUB_TOKEN') ?: '';
 $githubRepo   = getenv('GITHUB_REPO') ?: '';
@@ -23,12 +31,30 @@ $githubBranch = getenv('GITHUB_BRANCH') ?: 'main';
 
 $dbFile = __DIR__ . '/database.json';
 
+// ---------------------------------------------------------
+// 3. SESSION FIX FOR RENDER (ВАЖНО!)
+// ---------------------------------------------------------
+// Настраиваем куки ДО старта сессии, чтобы она не слетала при редиректах
+ini_set('session.cookie_lifetime', 86400); 
+ini_set('session.gc_maxlifetime', 86400);
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => $_SERVER['HTTP_HOST'] ?? '',
+    'secure' => true,      // Только HTTPS
+    'httponly' => true,    // Защита от JS
+    'samesite' => 'Lax'    // Разрешает переходы по вкладкам
+]);
+
+// ---------------------------------------------------------
+// 4. GITHUB FUNCTIONS
+// ---------------------------------------------------------
 function githubGet($repo, $path, $branch, $token) {
     if (!$token || !$repo) return null;
     $url = "https://api.github.com/repos/{$repo}/contents/{$path}?ref={$branch}";
     $opts = ['http' => [
         'header' => "User-Agent: LoriPanel\r\nAuthorization: token {$token}\r\nAccept: application/vnd.github.v3+json\r\n",
-        'method' => 'GET', 'ignore_errors' => true, 'timeout' => 15
+        'method' => 'GET', 'ignore_errors' => true, 'timeout' => 10
     ]];
     $res = @file_get_contents($url, false, stream_context_create($opts));
     if ($res === false) return null;
@@ -43,7 +69,7 @@ function githubPut($repo, $path, $branch, $token, $content, $sha = '') {
     if (!$token || !$repo) return false;
     $url = "https://api.github.com/repos/{$repo}/contents/{$path}";
     $body = [
-        'message' => 'lori db ' . date('Y-m-d H:i:s'),
+        'message' => 'lori db update ' . date('Y-m-d H:i:s'),
         'content' => base64_encode($content),
         'branch'  => $branch
     ];
@@ -53,18 +79,25 @@ function githubPut($repo, $path, $branch, $token, $content, $sha = '') {
         'method' => 'PUT',
         'content' => json_encode($body),
         'ignore_errors' => true,
-        'timeout' => 20
+        'timeout' => 15
     ]];
     $res = @file_get_contents($url, false, stream_context_create($opts));
     return $res !== false;
 }
 
+// ---------------------------------------------------------
+// 5. DATABASE INITIALIZATION (OPTIMIZED)
+// ---------------------------------------------------------
 $db = [];
 $githubSha = '';
+
+// Загружаем локальный файл если есть
 if (file_exists($dbFile)) {
     $db = json_decode(file_get_contents($dbFile), true);
     if (!is_array($db)) $db = [];
 }
+
+// Если база пустая или нет ключей — пробуем скачать с GitHub (ТОЛЬКО ОДИН РАЗ при старте/пустоте)
 if ((empty($db['keys']) || !is_array($db['keys'])) && $githubToken && $githubRepo) {
     $g = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
     if ($g && is_array($g['data'])) {
@@ -74,12 +107,14 @@ if ((empty($db['keys']) || !is_array($db['keys'])) && $githubToken && $githubRep
     }
 }
 
+// Инициализация структур данных
 foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log','notes_global'] as $k) {
     if (!isset($db[$k]) || !is_array($db[$k])) $db[$k] = [];
 }
 if (!isset($db['settings']) || !is_array($db['settings'])) $db['settings'] = [];
 if (!isset($db['stats']) || !is_array($db['stats'])) $db['stats'] = ['purchases'=>0,'stars'=>0,'activations'=>0];
 
+// Дефолтные настройки
 $db['settings'] = array_merge([
     'status' => 'online',
     'soft_status' => 'undetected',
@@ -105,40 +140,57 @@ $db['settings'] = array_merge([
     'github_sync' => true
 ], $db['settings']);
 
+// ---------------------------------------------------------
+// 6. CORE FUNCTIONS
+// ---------------------------------------------------------
 function saveDb() {
     global $db, $dbFile, $githubToken, $githubRepo, $githubPath, $githubBranch, $githubSha;
+    
+    // 1. Сохраняем локально
     $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     file_put_contents($dbFile, $json);
+    
+    // 2. Отправляем в GitHub ТОЛЬКО если включена синхронизация и есть токен
+    // Это предотвращает лаги и 502 ошибки при каждом клике
     if (!empty($db['settings']['github_sync']) && $githubToken && $githubRepo) {
+        // Получаем актуальный SHA если его нет
         if ($githubSha === '') {
             $g = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
             if ($g) $githubSha = $g['sha'] ?? '';
         }
+        
+        // Пробуем отправить
         $ok = githubPut($githubRepo, $githubPath, $githubBranch, $githubToken, $json, $githubSha);
+        
+        // Обновляем SHA после успешной отправки
         if ($ok) {
             $g2 = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
             if ($g2) $githubSha = $g2['sha'] ?? $githubSha;
         }
     }
 }
+
 function addLog($text) {
     global $db;
     array_unshift($db['logs'], ['time'=>time(),'text'=>$text]);
     if (count($db['logs']) > 600) array_pop($db['logs']);
     saveDb();
 }
+
 function addAccessLog($key, $hwid, $ip, $ok) {
     global $db;
     array_unshift($db['access_log'], ['time'=>time(),'key'=>$key,'hwid'=>$hwid,'ip'=>$ip,'ok'=>$ok]);
     if (count($db['access_log']) > 800) array_pop($db['access_log']);
     saveDb();
 }
+
 function addExtendLog($text, $count=0, $days=0) {
     global $db;
     array_unshift($db['extend_log'], ['time'=>time(),'text'=>$text,'count'=>$count,'days'=>$days]);
     if (count($db['extend_log']) > 200) array_pop($db['extend_log']);
     saveDb();
 }
+
 function makeKeyData($duration, $max, $level, $owner_tg=0, $owner_name='', $named=false) {
     global $db;
     return [
@@ -151,12 +203,15 @@ function makeKeyData($duration, $max, $level, $owner_tg=0, $owner_name='', $name
         'color'=>'','pulse'=>false,'silent'=>false
     ];
 }
+
 function redirectAdmin($tab='dashboard', $msg='') {
     $url = '?admin&tab='.urlencode($tab);
     if ($msg !== '') $url .= '&msg='.urlencode($msg);
     header('Location: '.$url); exit;
 }
+
 function weekId() { return date('o-W'); }
+
 function canUserFreeze($kd) {
     global $db;
     $limit = !empty($kd['aura'])
@@ -166,6 +221,7 @@ function canUserFreeze($kd) {
     $used = (int)($kd['freeze_week'][$w] ?? 0);
     return $used < $limit;
 }
+
 function registerUserFreeze(&$kd) {
     $w = weekId();
     if (!isset($kd['freeze_week']) || !is_array($kd['freeze_week'])) $kd['freeze_week'] = [];
@@ -215,20 +271,25 @@ function ico($name, $size=18) {
     return $map[$name] ?? '';
 }
 
+// Очистка онлайн списка (старые > 2 мин)
 foreach ($db['online'] as $hwid => $data) {
     if (time() - ($data['last_ping'] ?? 0) > 120) unset($db['online'][$hwid]);
 }
-saveDb();
+// Сохраняем очистку онлайна редко, чтобы не грузить GitHub каждый пинг
+// saveDb(); // Убрал отсюда для скорости, сохранится при следующем действии
 
 $action = $_GET['action'] ?? '';
 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
-// API
+// ---------------------------------------------------------
+// 7. API ENDPOINTS (STATUS CHECK & KEY CHECK)
+// ---------------------------------------------------------
 if ($action === 'status_check') {
     header('Content-Type: application/json; charset=utf-8');
     $clientChecksum = $_POST['checksum'] ?? $_GET['checksum'] ?? '';
     $hwid = $_POST['hwid'] ?? $_GET['hwid'] ?? '';
     $key  = $_POST['key']  ?? $_GET['key']  ?? '';
+    
     if (!empty($clientChecksum) && strtolower($clientChecksum) !== strtolower($db['settings']['checksum'])) {
         echo json_encode(['status'=>'error','message'=>'Modification detected']); exit;
     }
@@ -241,10 +302,13 @@ if ($action === 'status_check') {
     if (($db['settings']['soft_status'] ?? '') === 'detected') {
         echo json_encode(['status'=>'detected','message'=>'Detected']); exit;
     }
+    
     if (!empty($hwid)) {
         $db['online'][$hwid] = ['ip'=>$ip,'key'=>$key?:'-','last_ping'=>time(),'first_seen'=>$db['online'][$hwid]['first_seen']??time()];
-        saveDb();
+        // Не сохраняем в базу каждый пинг, чтобы не убить GitHub API лимиты
+        // Файл обновится при следующем реальном действии
     }
+    
     echo json_encode([
         'status'=>$db['settings']['status'],
         'soft_status'=>$db['settings']['soft_status']??'undetected',
@@ -262,22 +326,27 @@ if ($action === 'check') {
     header('Content-Type: text/plain; charset=utf-8');
     $key  = trim($_POST['key']  ?? $_GET['key']  ?? '');
     $hwid = trim($_POST['hwid'] ?? $_GET['hwid'] ?? '');
+    
     if ($db['settings']['status'] === 'maintenance') { echo $db['settings']['maintenance_msg'] ?? 'Maintenance'; exit; }
     if ($db['settings']['status'] === 'killswitch') { echo $db['settings']['emergency_msg'] ?: 'Stopped'; exit; }
     if (!empty($db['settings']['global_freeze'])) { echo 'Frozen'; exit; }
     if (($db['settings']['soft_status'] ?? '') === 'detected') { echo 'Detected'; exit; }
     if (empty($key) || empty($hwid)) { echo empty($key)?'No key':'No HWID'; exit; }
+    
     if (isset($db['blacklist'][$ip]) || isset($db['blacklist'][$hwid])) {
         addAccessLog($key,$hwid,$ip,false); echo 'Blocked'; exit;
     }
     if (!isset($db['keys'][$key])) { addAccessLog($key,$hwid,$ip,false); echo 'Invalid key'; exit; }
+    
     $kd = $db['keys'][$key];
     $now = time();
     if (!empty($kd['is_frozen'])) { addAccessLog($key,$hwid,$ip,false); echo 'Key frozen'; exit; }
     if (!empty($kd['soft_ban_until']) && $now < $kd['soft_ban_until']) { addAccessLog($key,$hwid,$ip,false); echo 'Temporary ban'; exit; }
     if (($kd['expires'] ?? 0) !== 0 && $now > $kd['expires']) { addAccessLog($key,$hwid,$ip,false); echo 'Expired'; exit; }
+    
     $max = (int)($kd['max'] ?? 1);
     if (!empty($kd['aura'])) $max += (int)($db['settings']['aura_extra_devices'] ?? 2);
+    
     $acts = $kd['activations'] ?? [];
     foreach ($acts as &$a) {
         if (($a['hwid'] ?? '') === $hwid) {
@@ -288,6 +357,7 @@ if ($action === 'check') {
         }
     }
     unset($a);
+    
     if (count($acts) < $max) {
         if (($kd['first_use'] ?? 0) == 0) {
             $db['keys'][$key]['first_use'] = $now;
@@ -319,9 +389,12 @@ if (($action === 'export_keys' || $action === 'export_json') && isset($_GET['adm
     exit;
 }
 
+// ---------------------------------------------------------
+// 8. ADMIN PANEL
+// ---------------------------------------------------------
 session_start();
-if (isset($_GET['admin'])) {
 
+if (isset($_GET['admin'])) {
     if (isset($_GET['logout'])) { session_destroy(); header('Location: ?admin'); exit; }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
@@ -1017,7 +1090,9 @@ function filterKeys(){const q=document.getElementById('searchKey').value.toLower
     exit;
 }
 
-// BOT
+// ---------------------------------------------------------
+// 9. TELEGRAM BOT
+// ---------------------------------------------------------
 $content = file_get_contents('php://input');
 $update = json_decode($content, true);
 if (!$update) {
