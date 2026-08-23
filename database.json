@@ -2,7 +2,7 @@
     "keys": {
         "PREMIUM-A2505A60": {
             "duration": 86400,
-            "expires": 0,
+            "expires": 1787588240,
             "first_use": 0,
             "max": 1,
             "activations": [],
@@ -26,7 +26,7 @@
         },
         "PREMIUM-6E0639FF": {
             "duration": 86400,
-            "expires": 0,
+            "expires": 1787588240,
             "first_use": 0,
             "max": 1,
             "activations": [],
