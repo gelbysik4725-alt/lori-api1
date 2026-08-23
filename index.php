@@ -3010,8 +3010,4 @@ if (isset($update['callback_query'])) {
         sendMessage($chatId,"<b>📊 Статистика</b>\n\nВсего ключей: $total\nАктивных: $active");
         exit;
     }
-    if ($data==='limits_info') {
-        answerCallback($cqId);
-        sendMessage($chatId,"<b>❓ Лимиты</b>\n\nСброс HWID: <b>".((int)$db['settings']['user_hwid_resets'])."</b>\nЗаморозка: <b>".((int)$db['settings']['user_freeze_per_week'])."</b> / неделя");
-        exit;
-  
+    
