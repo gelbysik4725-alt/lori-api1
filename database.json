@@ -24,7 +24,7 @@
             "pulse": false,
             "silent": false
         },
-        "PREMIUM-AB21F7C9": {
+        "PREMIUM-6E0639FF": {
             "duration": 86400,
             "expires": 0,
             "first_use": 0,
@@ -35,55 +35,7 @@
             "reset_left": 2,
             "is_frozen": false,
             "level": "premium",
-            "created": 1787501807,
-            "warns": 0,
-            "note": "",
-            "aura": false,
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
-        },
-        "PREMIUM-03CABA93": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787501811,
-            "warns": 0,
-            "note": "",
-            "aura": false,
-            "named": false,
-            "tag": "",
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "color": "",
-            "pulse": false,
-            "silent": false
-        },
-        "PREMIUM-4E2107AE": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787501815,
+            "created": 1787501786,
             "warns": 0,
             "note": "",
             "aura": false,
@@ -100,16 +52,8 @@
     "blacklist": [],
     "logs": [
         {
-            "time": 1787501816,
-            "text": "Key: PREMIUM-4E2107AE"
-        },
-        {
-            "time": 1787501812,
-            "text": "Key: PREMIUM-03CABA93"
-        },
-        {
-            "time": 1787501809,
-            "text": "Key: PREMIUM-AB21F7C9"
+            "time": 1787501788,
+            "text": "Key: PREMIUM-6E0639FF"
         },
         {
             "time": 1787499763,
@@ -119,12 +63,12 @@
     "online": [],
     "login_log": [
         {
-            "time": 1787501798,
+            "time": 1787501829,
             "ip": "31.130.130.192",
             "ok": true
         },
         {
-            "time": 1787501764,
+            "time": 1787501780,
             "ip": "31.130.130.192",
             "ok": true
         },
