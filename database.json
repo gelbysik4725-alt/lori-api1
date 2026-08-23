@@ -47,66 +47,16 @@
             "color": "",
             "pulse": false,
             "silent": false
-        },
-        "LORI-PREMIUM-1EBC3F": {
-            "duration": 86400,
-            "expires": 0,
-            "first_use": 0,
-            "max": 1,
-            "activations": [],
-            "owner_tg": 0,
-            "owner_name": "",
-            "reset_left": 2,
-            "is_frozen": false,
-            "level": "premium",
-            "created": 1787507528,
-            "warns": 0,
-            "note": "",
-            "named": false,
-            "tag": "",
-            "folder": "",
-            "color": "",
-            "favorite": false,
-            "archived": false,
-            "priority": 0,
-            "launch_limit": 0,
-            "launches_count": 0,
-            "ip_list": [],
-            "country_list": [],
-            "time_restrict": [],
-            "one_time": false,
-            "used": false,
-            "grace_until": 0,
-            "warning_sent": false,
-            "version_lock": "",
-            "products": [],
-            "template": "",
-            "auto_name": false,
-            "qr_data": "",
-            "link_key": false,
-            "share_token": "",
-            "rent_to": 0,
-            "rent_until": 0,
-            "family_members": [],
-            "soft_ban_until": 0,
-            "android_id": "",
-            "freeze_week": [],
-            "pulse": false,
-            "silent": false,
-            "priority_support": false,
-            "achievements": [],
-            "promo_used": "",
-            "last_activity": 0
         }
     },
     "blacklist": [],
     "logs": [
         {
-            "time": 1787507519,
+            "time": 1787507542,
             "text": "Admin login from 31.76.252.75"
         },
         {
-            "time": 1787507509,
+            "time": 1787507486,
             "text": "Admin login from 31.76.252.75"
         },
         {
@@ -129,12 +79,12 @@
     "online": [],
     "login_log": [
         {
-            "time": 1787507519,
+            "time": 1787507542,
             "ip": "31.76.252.75",
             "ok": true
         },
         {
-            "time": 1787507509,
+            "time": 1787507486,
             "ip": "31.76.252.75",
             "ok": true
         },
