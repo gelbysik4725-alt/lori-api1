@@ -2973,41 +2973,4 @@ if (isset($update['message'])) {
         if($isAdmin) $kb['inline_keyboard'][]=[['text'=>'⚙️ Админ','callback_data'=>'admin_panel']];
         sendMessage($chatId, $db['settings']['bot_welcome'] ?? "<b>LORI</b>\nВыберите срок:", $kb);
     }
-    
-    if ($text==='/stats' && $isAdmin) {
-        $total=count($db['keys']);
-        $active=0;
-        foreach($db['keys'] as $kd) if(keyStatus($kd)==='active') $active++;
-        sendMessage($chatId,"<b>📊 Статистика</b>\n\nВсего ключей: $total\nАктивных: $active\nОнлайн: ".count($db['online'])."\nПокупок: ".($db['stats']['purchases']??0)."\nЗвёзд: ".($db['stats']['stars']??0));
-        exit;
-    }
-}
-if (isset($update['callback_query'])) {
-    $cq=$update['callback_query'];
-    $chatId=(int)$cq['message']['chat']['id'];
-    $data=$cq['data'];
-    $msgId=$cq['message']['message_id'];
-    $cqId=$cq['id'];
-    $isAdmin=($chatId===$adminId);
-    
-    if (strpos($data,'buy_')===0) {
-        if(empty($db['settings']['purchases_enabled'])){answerCallback($cqId,'Покупки выкл',true);exit;}
-        $h=(int)explode('_',$data)[1];
-        $m=[1=>10,24=>25,168=>75,720=>125,0=>400];
-        sendInvoice($chatId,'LORI','Access',"sub_{$h}_1",$m[$h]??25);
-        answerCallback($cqId); exit;
-    }
-    if ($data==='aura_info') {
-        answerCallback($cqId);
-        sendMessage($chatId,"<b>✨ AURA</b>\n\nСкоро...");
-        exit;
-    }
-    if ($data==='stats_info') {
-        answerCallback($cqId);
-        $total=count($db['keys']);
-        $active=0;
-        foreach($db['keys'] as $kd) if(keyStatus($kd)==='active') $active++;
-        sendMessage($chatId,"<b>📊 Статистика</b>\n\nВсего ключей: $total\nАктивных: $active");
-        exit;
-    }
-    
+
