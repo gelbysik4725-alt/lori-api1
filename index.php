@@ -739,3 +739,4 @@ label input[type="checkbox"]{width:auto;margin:0}
         <a href="?admin&tab=generate" class="<?= $tab==='generate'?'active':'' ?>"><?= ico('plus',18) ?> <span>Создать</span></a>
         <a href="?admin&tab=bulk" class="<?= $tab==='bulk'?'active':'' ?>"><?= ico('zap',18) ?> <span>Массово</span></a>
         <a href="?admin&tab=tools" class="<?= $tab==='tools'?'active':'' ?>"><?= ico('shield',18)
+}
