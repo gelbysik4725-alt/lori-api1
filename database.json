@@ -143,7 +143,14 @@
             "ok": true
         }
     ],
-    "extend_log": [],
+    "extend_log": [
+        {
+            "time": 1787501841,
+            "text": "Всем +1 д",
+            "count": 2,
+            "days": 1
+        }
+    ],
     "access_log": [],
     "notes_global": [],
     "settings": {
