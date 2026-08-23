@@ -13,25 +13,26 @@ if (!$isHttps && php_sapi_name() !== 'cli') {
     exit;
 }
 header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
 
 // ---------------------------------------------------------
 // 2. CONFIG
 // ---------------------------------------------------------
-$botToken = getenv('BOT_TOKEN') ?: 'ВАШ_ТОКЕН_БОТА';
-$adminId  = (int)(getenv('ADMIN_ID') ?: 123456789);
+$botToken = getenv('BOT_TOKEN') ?: '8883380357:AAHrYtiqhcCTBvllozb5m4pMUQIw922a0Oo'; // Замените на свой если нужно
+$adminId  = (int)(getenv('ADMIN_ID') ?: 8875180956);
 $adminPass = 'LoriElite';
 
-// Настройки GitHub для ЧТЕНИЯ и ЗАПИСИ
+// GitHub Config
 $ghToken  = getenv('GITHUB_TOKEN') ?: '';
-$ghRepo   = getenv('GITHUB_REPO') ?: ''; // формат: user/repo
+$ghRepo   = getenv('GITHUB_REPO') ?: ''; 
 $ghPath   = getenv('GITHUB_PATH') ?: 'database.json';
 $ghBranch = getenv('GITHUB_BRANCH') ?: 'main';
 
 $dbFile = __DIR__ . '/database.json';
-$ghShaCacheFile = __DIR__ . '/.gh_sha_cache'; // Кэш SHA коммита
+$ghShaCacheFile = __DIR__ . '/.gh_sha_cache'; 
 
 // ---------------------------------------------------------
-// 3. SESSION
+// 3. SESSION FIX
 // ---------------------------------------------------------
 if (session_status() === PHP_SESSION_NONE) {
     session_name('LORI_SID');
@@ -40,7 +41,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_set_cookie_params([
         'lifetime' => 86400,
         'path' => '/',
-        'domain' => '',
+        'domain' => '', // Важно: пусто для работы на поддоменах Render
         'secure' => true,
         'httponly' => true,
         'samesite' => 'Lax'
@@ -84,12 +85,10 @@ function ghPut($token, $repo, $path, $branch, $content, $sha) {
         'timeout' => 10, 'ignore_errors' => true
     ]]);
     $res = @file_get_contents($url, false, $ctx);
-    // Проверяем успешность по коду ответа (200 или 201)
-    // file_get_contents возвращает false при ошибке HTTP, но нам важно просто отправить
     return ($res !== false); 
 }
 
-// Получаем последний известный SHA
+// Init SHA Cache
 $currentSha = @file_get_contents($ghShaCacheFile);
 if (!$currentSha && $ghToken && $ghRepo) {
     $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
@@ -122,47 +121,12 @@ if (empty($db['keys']) && $ghToken && $ghRepo) {
 }
 
 // Init defaults
-foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log'] as $k) {
+foreach (['keys','blacklist','logs','online','login_log','extend_log','access_log','notes_global'] as $k) {
     if (!isset($db[$k])) $db[$k] = [];
 }
 if (!isset($db['settings'])) $db['settings'] = [];
-$db['settings'] = array_merge([
-    'status' => 'online', 'soft_status' => 'undetected', 'global_freeze' => false,
-    'version' => '5.0.0', 'checksum' => 'abc123', 'download_url' => '',
-    'panel_accent' => '#22c55e', 'panel_bg_color' => '#030303',
-    'user_hwid_resets' => 2, 'aura_hwid_resets' => 6
-], $db['settings']);
+if (!isset($db['stats'])) $db['stats'] = ['purchases'=>0,'stars'=>0,'activations'=>0];
 
-function saveDb() {
-    global $db, $dbFile, $ghToken, $ghRepo, $ghPath, $ghBranch, $currentSha, $ghShaCacheFile;
-    
-    $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-    
-    // 1. Сохраняем локально мгновенно
-    file_put_contents($dbFile, $json);
-    
-    // 2. Отправляем в GitHub (если настроено)
-    if ($ghToken && $ghRepo) {
-        // Обновляем SHA перед отправкой, чтобы избежать конфликта версий
-        $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
-        $shaToSend = $g ? $g['sha'] : $currentSha;
-        
-        if ($shaToSend) {
-            $success = ghPut($ghToken, $ghRepo, $ghPath, $ghBranch, $json, $shaToSend);
-            if ($success) {
-                // Если успешно, обновляем кэш SHA (хотя лучше получить новый, но для скорости берем текущий + 1 логически)
-                // В идеале тут надо сделать еще один GET, но мы пропустим для скорости
-                @file_put_contents($ghShaCacheFile, $shaToSend); 
-            }
-        }
-    }
-}
-
-// ... (Остальная часть вашего кода: функции addLog, makeKeyData, API endpoints, Admin Panel HTML) ...
-// ВСТАВЬТЕ СЮДА ОСТАЛЬНУЮ ЧАСТЬ КОДА ИЗ ПРЕДЫДУЩЕГО ОТВЕТА (начиная с function addLog...)
-// Я не дублирую весь HTML, так как он огромный, но логика saveDb() выше - главная.
-?>
-// Дефолтные настройки
 $db['settings'] = array_merge([
     'status' => 'online',
     'soft_status' => 'undetected',
@@ -185,33 +149,27 @@ $db['settings'] = array_merge([
     'aura_freeze_per_week' => 6,
     'aura_extra_devices' => 2,
     'maintenance_msg' => 'Сервер на обслуживании',
-    'github_sync' => true
+    'github_sync' => true // Включаем синхронизацию
 ], $db['settings']);
 
-// ---------------------------------------------------------
-// 6. CORE FUNCTIONS
-// ---------------------------------------------------------
 function saveDb() {
-    global $db, $dbFile, $githubToken, $githubRepo, $githubPath, $githubBranch, $githubSha;
+    global $db, $dbFile, $ghToken, $ghRepo, $ghPath, $ghBranch, $currentSha, $ghShaCacheFile;
     
-    // 1. Сохраняем локально ВСЕГДА
     $json = json_encode($db, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    
+    // 1. Сохраняем локально мгновенно
     file_put_contents($dbFile, $json);
     
-    // 2. Отправляем в GitHub ТОЛЬКО если включена синхронизация и есть токен
-    // Делаем это в фоне, чтобы не тормозить ответ пользователю
-    if (!empty($db['settings']['github_sync']) && $githubToken && $githubRepo) {
-        // Получаем актуальный SHA если его нет (можно оптимизировать, храня в памяти)
-        if ($githubSha === '') {
-            $g = githubGet($githubRepo, $githubPath, $githubBranch, $githubToken);
-            if ($g) $githubSha = $g['sha'] ?? '';
+    // 2. Отправляем в GitHub (если настроено)
+    if (!empty($db['settings']['github_sync']) && $ghToken && $ghRepo) {
+        // Обновляем SHA перед отправкой, чтобы избежать конфликта версий
+        $g = ghGet($ghToken, $ghRepo, $ghPath, $ghBranch);
+        $shaToSend = $g ? $g['sha'] : $currentSha;
+        
+        if ($shaToSend) {
+            ghPut($ghToken, $ghRepo, $ghPath, $ghBranch, $json, $shaToSend);
+            // Не обновляем кэш сразу, пусть следующий запрос возьмет свежий
         }
-        
-        // Асинхронная отправка
-        githubPutAsync($githubRepo, $githubPath, $githubBranch, $githubToken, $json, $githubSha);
-        
-        // Обновляем SHA после успешной отправки (в следующем запросе подтянется новый)
-        // Здесь мы не ждем ответа, чтобы не создавать 502
     }
 }
 
@@ -316,7 +274,7 @@ function ico($name, $size=18) {
     return $map[$name] ?? '';
 }
 
-// Очистка онлайн списка (старые > 2 мин)
+// Очистка онлайн списка
 foreach ($db['online'] as $hwid => $data) {
     if (time() - ($data['last_ping'] ?? 0) > 120) unset($db['online'][$hwid]);
 }
@@ -325,7 +283,7 @@ $action = $_GET['action'] ?? '';
 $ip = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
 // ---------------------------------------------------------
-// 7. API ENDPOINTS (STATUS CHECK & KEY CHECK)
+// 7. API ENDPOINTS
 // ---------------------------------------------------------
 if ($action === 'status_check') {
     header('Content-Type: application/json; charset=utf-8');
@@ -617,18 +575,18 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
         if ($act==='github_force_push') {
             $json=json_encode($db, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE);
             file_put_contents($dbFile,$json);
-            $g=githubGet($githubRepo,$githubPath,$githubBranch,$githubToken);
+            $g=ghGet($ghToken,$ghRepo,$ghPath,$ghBranch);
             $sha=$g['sha']??'';
-            $ok=githubPutAsync($githubRepo,$githubPath,$githubBranch,$githubToken,$json,$sha);
-            redirectAdmin('github', $ok?'GitHub: сохранено (async)':'GitHub: ошибка (проверь TOKEN/REPO)');
+            $ok=ghPut($ghToken,$ghRepo,$ghPath,$ghBranch,$json,$sha);
+            redirectAdmin('github', $ok?'GitHub: сохранено':'GitHub: ошибка');
         }
         if ($act==='github_force_pull') {
-            $g=githubGet($githubRepo,$githubPath,$githubBranch,$githubToken);
+            $g=ghGet($ghToken,$ghRepo,$ghPath,$ghBranch);
             if($g && is_array($g['data'])){
                 $db=$g['data'];
                 foreach(['keys','blacklist','logs','online'] as $kk) if(!isset($db[$kk])) $db[$kk]=[];
                 file_put_contents($dbFile, json_encode($db, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE));
-                $githubSha=$g['sha']??'';
+                $currentSha=$g['sha']??'';
                 redirectAdmin('github','GitHub: загружено, ключей '.count($db['keys']??[]));
             }
             redirectAdmin('github','GitHub: не удалось загрузить');
@@ -686,7 +644,7 @@ button{width:100%;padding:14px;background:linear-gradient(135deg,#22c55e,#16a34a
         if(!empty($kd['aura']))$auraCount++;
         if(!empty($kd['named']))$namedCount++;
     }
-    $githubOk = ($githubToken && $githubRepo);
+    $githubOk = ($ghToken && $ghRepo);
 
     $accent=$db['settings']['panel_accent']??'#22c55e';
     $panelBg=$db['settings']['panel_bg']??'';
@@ -915,7 +873,7 @@ th{color:var(--accent);font-size:11px}
 <p style="color:#aaa;font-size:12px;line-height:1.7;margin-bottom:12px">
 Ключи пишутся в <code>database.json</code> и пушатся в репозиторий.<br>
 Статус: <b style="color:<?= $githubOk?'#4ade80':'#f87171' ?>"><?= $githubOk?'настроен':'не настроен' ?></b><br>
-Repo: <code><?= htmlspecialchars($githubRepo?:'—') ?></code> · Path: <code><?= htmlspecialchars($githubPath) ?></code>
+Repo: <code><?= htmlspecialchars($ghRepo?:'—') ?></code> · Path: <code><?= htmlspecialchars($ghPath) ?></code>
 </p>
 <form method="post" class="form-row"><input type="hidden" name="action" value="github_force_push">
 <button class="btn btn-accent" type="submit"><?= ico('upload',14) ?> Force push в GitHub</button></form>
