@@ -71,10 +71,38 @@
             "color": "",
             "pulse": false,
             "silent": false
+        },
+        "PREMIUM-4E2107AE": {
+            "duration": 86400,
+            "expires": 0,
+            "first_use": 0,
+            "max": 1,
+            "activations": [],
+            "owner_tg": 0,
+            "owner_name": "",
+            "reset_left": 2,
+            "is_frozen": false,
+            "level": "premium",
+            "created": 1787501815,
+            "warns": 0,
+            "note": "",
+            "aura": false,
+            "named": false,
+            "tag": "",
+            "soft_ban_until": 0,
+            "android_id": "",
+            "freeze_week": [],
+            "color": "",
+            "pulse": false,
+            "silent": false
         }
     },
     "blacklist": [],
     "logs": [
+        {
+            "time": 1787501812,
+            "text": "Key: PREMIUM-03CABA93"
+        },
         {
             "time": 1787501809,
             "text": "Key: PREMIUM-AB21F7C9"
