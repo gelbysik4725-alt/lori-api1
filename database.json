@@ -23,10 +23,38 @@
             "color": "",
             "pulse": false,
             "silent": false
+        },
+        "PREMIUM-BF66CB0F": {
+            "duration": 86400,
+            "expires": 0,
+            "first_use": 0,
+            "max": 1,
+            "activations": [],
+            "owner_tg": 0,
+            "owner_name": "",
+            "reset_left": 2,
+            "is_frozen": false,
+            "level": "premium",
+            "created": 1787501062,
+            "warns": 0,
+            "note": "",
+            "aura": false,
+            "named": false,
+            "tag": "",
+            "soft_ban_until": 0,
+            "android_id": "",
+            "freeze_week": [],
+            "color": "",
+            "pulse": false,
+            "silent": false
         }
     },
     "blacklist": [],
     "logs": [
+        {
+            "time": 1787501063,
+            "text": "Key: PREMIUM-BF66CB0F"
+        },
         {
             "time": 1787499763,
             "text": "Key: PREMIUM-A2505A60"
@@ -35,14 +63,14 @@
     "online": [],
     "login_log": [
         {
-            "time": 1787500986,
+            "time": 1787501054,
             "ip": "31.130.130.192",
             "ok": true
         },
         {
-            "time": 1787500978,
+            "time": 1787501009,
             "ip": "31.130.130.192",
-            "ok": false
+            "ok": true
         },
         {
             "time": 1787500291,
