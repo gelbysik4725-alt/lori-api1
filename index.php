@@ -484,7 +484,7 @@ if (isset($_GET['admin'])) {
 
     if (empty($_SESSION['admin'])) {
         header('Content-Type: text/html; charset=utf-8');
-        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LORI</title>
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LORI — Elite Control Panel</title>
 <style>@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 *{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#030303;font-family:Inter,system-ui;color:#e5e5e5;-webkit-font-smoothing:antialiased}
@@ -733,7 +733,25 @@ button:active{transform:scale(.98)}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LORI</title>
+<title>LORI — Elite Control Panel</title>
+<?php if($panelBg): ?>
+<link rel="preload" as="image" href="<?= htmlspecialchars($panelBg,ENT_QUOTES) ?>" fetchpriority="high">
+<?php endif; ?>
+<style id="bg-boot">
+/* FIX: фон рисуется на <html> ещё до загрузки основного CSS,
+   поэтому при переключении вкладок больше нет вспышки дефолтного фона */
+html{
+  background-color:<?= htmlspecialchars($panelBgColor) ?>;
+<?php if($panelBg): ?>
+  background-image:url('<?= htmlspecialchars($panelBg,ENT_QUOTES) ?>');
+  background-size:cover;background-position:center center;
+  background-repeat:no-repeat;background-attachment:fixed;
+<?php endif; ?>
+}
+body{background:transparent !important}
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root{
@@ -894,6 +912,126 @@ tbody tr:last-child td{border-bottom:none}
   .form-row input[type=text],.form-row input[type=number]{flex:1;min-width:0}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ==========================================================
+   LORI v3 — ELITE LAYER
+   ========================================================== */
+:root{
+  --font-display:'Space Grotesk','Inter',system-ui,sans-serif;
+  --glass:rgba(16,16,20,.55);
+  --glass-strong:rgba(10,10,13,.78);
+  --hair:rgba(255,255,255,.08);
+  --ring:0 0 0 1px rgba(var(--accent-rgb),.25);
+  --lift:0 24px 60px -30px rgba(0,0,0,.95);
+}
+html.lori-compact{--radius:10px}
+html.lori-compact .content{padding:14px 12px 40px}
+html.lori-compact .card{padding:13px}
+html.lori-light{--bg:#f4f5f7;--text:#14151a;--muted:#5b6070;--card:rgba(255,255,255,.78);--glass:rgba(255,255,255,.7);--glass-strong:rgba(255,255,255,.88);--border:rgba(10,10,20,.09);--hair:rgba(10,10,20,.08)}
+html.lori-light body::after{background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.6))}
+
+body{font-size:13.5px;letter-spacing:.1px}
+h1,h2,h3,.stat .n,.kp-title{font-family:var(--font-display);letter-spacing:-.4px}
+
+/* фоновые «ауры» поверх картинки — глубина, но без потери читаемости */
+body{position:relative}
+.aurora{position:fixed;inset:-20%;z-index:-1;pointer-events:none;opacity:.5;
+  background:radial-gradient(38% 40% at 12% 8%,rgba(var(--accent-rgb),.22),transparent 60%),
+             radial-gradient(34% 36% at 88% 92%,rgba(var(--accent-rgb),.14),transparent 60%);
+  filter:blur(30px);animation:auroraMove 18s ease-in-out infinite alternate}
+@keyframes auroraMove{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.08)}}
+html.lori-nofx .aurora{display:none}
+
+/* появление контента — вместо резкого «моргания» */
+.content{animation:fadeUp .34s cubic-bezier(.2,.8,.2,1)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+html.lori-nofx .content{animation:none}
+
+/* header */
+.header{background:var(--glass-strong);backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);border-bottom:1px solid var(--hair)}
+.header h1{letter-spacing:8px;text-shadow:0 0 22px rgba(var(--accent-rgb),.45)}
+.header a{font-weight:500}
+.hbar{display:flex;align-items:center;gap:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid var(--hair);background:rgba(255,255,255,.04);font-size:11px;color:var(--muted)}
+.pill b{color:var(--text);font-weight:600}
+.pill.ok{color:#4ade80;border-color:rgba(74,222,128,.28);background:rgba(74,222,128,.08)}
+.pill.warn{color:#fbbf24;border-color:rgba(251,191,36,.28);background:rgba(251,191,36,.08)}
+.pill.bad{color:#f87171;border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.08)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;border:1px solid var(--hair);background:rgba(255,255,255,.04);color:var(--muted);cursor:pointer;transition:var(--t)}
+.icon-btn:hover{color:var(--text);border-color:var(--border-strong);transform:translateY(-1px)}
+
+/* sidebar */
+.sidebar{width:218px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+html.lori-rail .sidebar{width:62px}
+html.lori-rail .sidebar a span.lbl-t{display:none}
+.sidebar a{letter-spacing:.2px}
+.sidebar a.active{box-shadow:inset 0 0 0 1px rgba(var(--accent-rgb),.24),0 8px 26px -18px rgba(var(--accent-rgb),.9)}
+.side-sep{margin:12px 6px 6px;font-size:9.5px;letter-spacing:2.4px;text-transform:uppercase;color:rgba(255,255,255,.24)}
+
+/* cards */
+.card,.stat,.kp{background:var(--glass);border:1px solid var(--hair);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);box-shadow:var(--lift);border-radius:calc(var(--radius) + 4px)}
+.card{position:relative;overflow:hidden}
+.card::after{content:'';position:absolute;inset:0 0 auto 0;height:1px;background:linear-gradient(90deg,transparent,rgba(var(--accent-rgb),.6),transparent);opacity:.6}
+.stat{position:relative;overflow:hidden;transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s}
+.stat:hover{transform:translateY(-3px);box-shadow:var(--lift),var(--ring)}
+.stat .n{font-size:26px;font-weight:700}
+
+/* buttons */
+.btn{border-radius:11px;font-weight:600;letter-spacing:.2px;transition:transform .16s cubic-bezier(.2,.8,.2,1),filter .16s,box-shadow .16s}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0) scale(.985)}
+.btn-green,.btn-primary{box-shadow:0 14px 34px -18px rgba(var(--accent-rgb),1)}
+.kp-btn{transition:transform .18s cubic-bezier(.2,.8,.2,1),background .18s,border-color .18s}
+.kp-btn:hover{transform:translateY(-2px)}
+
+/* inputs */
+input,select,textarea{transition:border-color .16s,box-shadow .16s,background .16s}
+input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(var(--accent-rgb),.16)}
+
+/* table */
+table tbody tr{transition:background .14s}
+table tbody tr:hover{background:rgba(var(--accent-rgb),.06)}
+tr.row-fav td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
+tr.row-soon td:first-child{box-shadow:inset 3px 0 0 #fbbf24}
+tr.row-dead td:first-child{box-shadow:inset 3px 0 0 #f87171}
+tr.row-sel{background:rgba(var(--accent-rgb),.12)!important}
+
+/* toasts */
+#lori-toasts{position:fixed;right:16px;bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:320px}
+.toast{background:var(--glass-strong);border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:12px;padding:10px 13px;font-size:12.5px;color:var(--text);box-shadow:var(--lift);backdrop-filter:blur(18px);animation:toastIn .26s cubic-bezier(.2,.8,.2,1)}
+.toast.bad{border-left-color:#f87171}
+@keyframes toastIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+
+/* command palette */
+#lori-cmd{position:fixed;inset:0;z-index:10000;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+#lori-cmd.open{display:flex}
+#lori-cmd .cmd{width:min(560px,92vw);background:var(--glass-strong);border:1px solid var(--border-strong);border-radius:18px;box-shadow:var(--lift);overflow:hidden;animation:fadeUp .22s cubic-bezier(.2,.8,.2,1)}
+#lori-cmd input{width:100%;border:none;border-bottom:1px solid var(--hair);background:transparent;padding:16px 18px;color:var(--text);font-size:15px;font-family:var(--font-display);outline:none;border-radius:0}
+#lori-cmd .cmd-list{max-height:52vh;overflow:auto;padding:6px}
+#lori-cmd .cmd-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px}
+#lori-cmd .cmd-item .k{font-size:10px;color:rgba(255,255,255,.35);border:1px solid var(--hair);padding:2px 6px;border-radius:6px}
+#lori-cmd .cmd-item.sel,#lori-cmd .cmd-item:hover{background:rgba(var(--accent-rgb),.14);color:var(--text)}
+
+/* health / drawer */
+#lori-health{position:fixed;right:0;top:0;height:100vh;width:min(330px,88vw);z-index:9998;transform:translateX(102%);transition:transform .3s cubic-bezier(.2,.8,.2,1);background:var(--glass-strong);backdrop-filter:blur(22px);border-left:1px solid var(--hair);padding:18px;overflow:auto}
+#lori-health.open{transform:none}
+#lori-health h3{font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.h-row{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--hair);font-size:12.5px;color:var(--muted)}
+.h-row b{color:var(--text);font-weight:600}
+.bar{height:6px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),rgba(var(--accent-rgb),.4))}
+
+/* misc */
+#lori-progress{position:fixed;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,var(--accent),transparent);z-index:10001;transition:width .25s}
+#lori-top{position:fixed;right:16px;bottom:70px;z-index:9990;display:none}
+#lori-top.show{display:block}
+.qr-wrap{display:flex;justify-content:center;padding:14px;background:#fff;border-radius:14px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.fav-star{cursor:pointer;color:rgba(255,255,255,.25);font-size:14px;user-select:none}
+.fav-star.on{color:#fbbf24}
+mark{background:rgba(var(--accent-rgb),.35);color:inherit;border-radius:3px}
+@media (max-width:820px){.sidebar{width:100%;position:static;max-height:none;min-height:0;display:flex;flex-wrap:wrap;gap:4px}.layout{flex-direction:column}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
@@ -1224,6 +1362,343 @@ document.addEventListener('keydown',function(e){
 });
 document.querySelectorAll('.msg').forEach(function(m){setTimeout(function(){m.style.transition='.4s';m.style.opacity='0';m.style.transform='translateY(-8px)';setTimeout(function(){m.remove()},400)},6000)});
 </script>
+<div class="aurora"></div>
+<div id="lori-progress"></div>
+<div id="lori-toasts"></div>
+<button id="lori-top" class="icon-btn" title="Наверх">↑</button>
+<div id="lori-cmd"><div class="cmd">
+  <input type="text" id="cmd-input" placeholder="Команда, вкладка или ключ…  (Esc — закрыть)">
+  <div class="cmd-list" id="cmd-list"></div>
+</div></div>
+<div id="lori-health">
+  <h3>Здоровье системы</h3>
+  <div id="health-body"></div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var LS = {
+    get:function(k,d){try{var v=localStorage.getItem('lori3_'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},
+    set:function(k,v){try{localStorage.setItem('lori3_'+k,JSON.stringify(v))}catch(e){}}
+  };
+  var root = document.documentElement;
+
+  /* 1. Тосты */
+  function toast(text, bad){
+    var box=document.getElementById('lori-toasts');
+    var el=document.createElement('div');
+    el.className='toast'+(bad?' bad':''); el.textContent=text;
+    box.appendChild(el);
+    setTimeout(function(){el.style.opacity='0';el.style.transform='translateX(18px)';el.style.transition='.25s';},2600);
+    setTimeout(function(){el.remove()},2950);
+  }
+  window.loriToast = toast;
+
+  /* 2. Копирование в один клик (ключи, HWID, IP) */
+  function copy(t){
+    if(navigator.clipboard && window.isSecureContext){navigator.clipboard.writeText(t).then(function(){toast('Скопировано: '+t.slice(0,28))});}
+    else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast('Скопировано');}
+  }
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-copy]');
+    if(t){e.preventDefault();copy(t.getAttribute('data-copy'));}
+  });
+  document.querySelectorAll('table td code, .kp-title').forEach(function(el){
+    el.style.cursor='copy';
+    el.title='Клик — скопировать';
+    el.addEventListener('click',function(){copy(el.textContent.trim())});
+  });
+
+  /* 3. Прогресс-бар навигации (убирает ощущение «мигания» при переходе) */
+  var prog=document.getElementById('lori-progress');
+  window.addEventListener('beforeunload',function(){prog.style.width='75%'});
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href^="?admin"]');
+    if(a && !a.target){prog.style.width='40%';}
+  });
+
+  /* 4. Живой поиск по любой таблице (/ — фокус) */
+  document.querySelectorAll('table').forEach(function(tb,i){
+    var rows=tb.querySelectorAll('tbody tr'); if(rows.length<4) return;
+    var wrap=document.createElement('div');
+    wrap.style.cssText='display:flex;gap:8px;margin:0 0 10px;align-items:center;flex-wrap:wrap';
+    wrap.innerHTML='<input class="lori-filter" placeholder="Фильтр по таблице… (/)" style="flex:1;min-width:180px">'+
+      '<button type="button" class="btn btn-dark btn-sm lori-csv">CSV</button>'+
+      '<span class="pill lori-count"></span>';
+    tb.parentNode.insertBefore(wrap,tb);
+    var inp=wrap.querySelector('.lori-filter'), cnt=wrap.querySelector('.lori-count');
+    function upd(){
+      var q=inp.value.toLowerCase(), n=0;
+      rows.forEach(function(r){
+        var ok=!q||r.textContent.toLowerCase().indexOf(q)>-1;
+        r.style.display=ok?'':'none'; if(ok)n++;
+      });
+      cnt.innerHTML='<b>'+n+'</b>&nbsp;строк';
+    }
+    inp.addEventListener('input',upd); upd();
+    /* 5. Экспорт видимых строк в CSV */
+    wrap.querySelector('.lori-csv').addEventListener('click',function(){
+      var out=[];
+      tb.querySelectorAll('tr').forEach(function(r){
+        if(r.style.display==='none')return;
+        out.push([].map.call(r.children,function(c){return '"'+c.innerText.replace(/"/g,'""').replace(/\s+/g,' ').trim()+'"'}).join(','));
+      });
+      var b=new Blob(['\ufeff'+out.join('\n')],{type:'text/csv;charset=utf-8'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='lori_table_'+i+'.csv';a.click();
+      toast('CSV выгружен');
+    });
+    /* 6. Сортировка по клику на заголовок */
+    tb.querySelectorAll('thead th').forEach(function(th,ci){
+      th.style.cursor='pointer'; th.title='Сортировать';
+      var dir=1;
+      th.addEventListener('click',function(){
+        var body=tb.tBodies[0];
+        var arr=[].slice.call(body.rows);
+        arr.sort(function(a,b){
+          var x=(a.cells[ci]||{}).innerText||'', y=(b.cells[ci]||{}).innerText||'';
+          var nx=parseFloat(x.replace(/[^\d.-]/g,'')), ny=parseFloat(y.replace(/[^\d.-]/g,''));
+          if(!isNaN(nx)&&!isNaN(ny)) return (nx-ny)*dir;
+          return x.localeCompare(y,'ru')*dir;
+        });
+        dir*=-1; arr.forEach(function(r){body.appendChild(r)});
+        toast('Отсортировано: '+th.innerText.trim());
+      });
+    });
+  });
+
+  /* 7. Избранные ключи (localStorage) + 8. подсветка «скоро истечёт» */
+  var favs=LS.get('favs',[]);
+  document.querySelectorAll('table tbody tr').forEach(function(r){
+    var codeEl=r.querySelector('code')||r.cells[0]; if(!codeEl)return;
+    var key=codeEl.textContent.trim();
+    var star=document.createElement('span');
+    star.className='fav-star'+(favs.indexOf(key)>-1?' on':'');
+    star.textContent='★'; star.title='В избранное';
+    star.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var i=favs.indexOf(key);
+      if(i>-1){favs.splice(i,1);star.classList.remove('on');r.classList.remove('row-fav');toast('Убрано из избранного');}
+      else{favs.push(key);star.classList.add('on');r.classList.add('row-fav');toast('В избранном: '+key);}
+      LS.set('favs',favs);
+    });
+    if(favs.indexOf(key)>-1) r.classList.add('row-fav');
+    codeEl.insertBefore(star,codeEl.firstChild);
+    star.style.marginRight='6px';
+    var txt=r.innerText;
+    if(/истёк|Expired/i.test(txt)) r.classList.add('row-dead');
+    else{ var m=txt.match(/(\d+)\s*д/); if(m && +m[1]<=3) r.classList.add('row-soon'); }
+  });
+
+  /* 9. Массовое выделение строк (Shift+клик) со счётчиком */
+  var selCount=0;
+  document.querySelectorAll('table tbody tr').forEach(function(r){
+    r.addEventListener('click',function(e){
+      if(!e.shiftKey) return;
+      r.classList.toggle('row-sel');
+      selCount=document.querySelectorAll('tr.row-sel').length;
+      toast('Выделено строк: '+selCount);
+    });
+  });
+
+  /* 10. Командная палитра Ctrl+K */
+  var tabs=[['dashboard','Dashboard'],['keys','Ключи'],['generate','Создать ключ'],['bulk','Массовая генерация'],
+            ['give','Выдать ключ'],['online','Онлайн'],['tools','Инструменты'],['access','Логи входов'],
+            ['github','GitHub'],['broadcast','Broadcast'],['blacklist','Чёрный список'],['settings','Настройки'],
+            ['logs','Логи'],['theme','Тема']];
+  var actions=tabs.map(function(t){return {label:'Перейти → '+t[1],hint:'tab',run:function(){location.href='?admin&tab='+t[0]}}});
+  actions.push({label:'Здоровье системы',hint:'H',run:function(){toggleHealth()}});
+  actions.push({label:'Свернуть/развернуть меню',hint:'B',run:function(){root.classList.toggle('lori-rail');LS.set('rail',root.classList.contains('lori-rail'))}});
+  actions.push({label:'Компактный режим',hint:'C',run:function(){root.classList.toggle('lori-compact');LS.set('compact',root.classList.contains('lori-compact'))}});
+  actions.push({label:'Светлая / тёмная тема',hint:'L',run:function(){root.classList.toggle('lori-light');LS.set('light',root.classList.contains('lori-light'))}});
+  actions.push({label:'Отключить анимации',hint:'X',run:function(){root.classList.toggle('lori-nofx');LS.set('nofx',root.classList.contains('lori-nofx'))}});
+  actions.push({label:'Автообновление страницы (60с)',hint:'R',run:function(){toggleAuto()}});
+  actions.push({label:'Экспорт всей базы (JSON)',hint:'',run:function(){location.href='?admin&action=export_json'}});
+  actions.push({label:'Экспорт списка ключей (TXT)',hint:'',run:function(){location.href='?admin&action=export_keys'}});
+  actions.push({label:'Выйти из панели',hint:'',run:function(){location.href='?admin&logout=1'}});
+
+  var cmd=document.getElementById('lori-cmd'), cmdIn=document.getElementById('cmd-input'), cmdList=document.getElementById('cmd-list'), cmdSel=0, cmdItems=[];
+  function renderCmd(){
+    var q=cmdIn.value.toLowerCase();
+    cmdItems=actions.filter(function(a){return a.label.toLowerCase().indexOf(q)>-1});
+    if(cmdSel>=cmdItems.length) cmdSel=0;
+    cmdList.innerHTML=cmdItems.map(function(a,i){
+      return '<div class="cmd-item'+(i===cmdSel?' sel':'')+'" data-i="'+i+'"><span>'+a.label+'</span>'+(a.hint?'<span class="k">'+a.hint+'</span>':'')+'</div>';
+    }).join('')||'<div class="cmd-item">Ничего не найдено</div>';
+  }
+  function openCmd(){cmd.classList.add('open');cmdIn.value='';cmdSel=0;renderCmd();cmdIn.focus()}
+  function closeCmd(){cmd.classList.remove('open')}
+  cmdIn.addEventListener('input',renderCmd);
+  cmdList.addEventListener('click',function(e){
+    var it=e.target.closest('.cmd-item'); if(!it||!cmdItems.length)return;
+    closeCmd(); cmdItems[+it.dataset.i].run();
+  });
+  cmd.addEventListener('click',function(e){if(e.target===cmd)closeCmd()});
+
+  /* 11. Панель здоровья системы */
+  function health(){
+    var stats=[].map.call(document.querySelectorAll('.stat'),function(s){
+      return {n:(s.querySelector('.n')||{}).innerText||'-',l:(s.querySelector('.l')||s.lastElementChild||{}).innerText||''};
+    });
+    var online=(navigator.onLine?'да':'нет');
+    var mem=(performance.memory?Math.round(performance.memory.usedJSHeapSize/1048576)+' МБ':'н/д');
+    var load=Math.round(performance.now())+' мс';
+    var rows=stats.map(function(s){return '<div class="h-row"><span>'+s.l+'</span><b>'+s.n+'</b></div>'}).join('');
+    document.getElementById('health-body').innerHTML=
+      rows+
+      '<div class="h-row"><span>Сеть</span><b>'+online+'</b></div>'+
+      '<div class="h-row"><span>Рендер страницы</span><b>'+load+'</b></div>'+
+      '<div class="h-row"><span>Память вкладки</span><b>'+mem+'</b></div>'+
+      '<div class="h-row"><span>Сессия</span><b id="h-sess">0:00</b></div>'+
+      '<div class="h-row" style="display:block"><span>Заполнение окна</span><div class="bar"><i style="width:'+Math.min(100,Math.round(window.innerWidth/19.2))+'%"></i></div></div>';
+  }
+  function toggleHealth(){var h=document.getElementById('lori-health');h.classList.toggle('open');if(h.classList.contains('open'))health()}
+
+  /* 12. Таймер сессии */
+  var t0=LS.get('sessStart',0); if(!t0){t0=Date.now();LS.set('sessStart',t0)}
+  setInterval(function(){
+    var s=Math.floor((Date.now()-t0)/1000);
+    var el=document.getElementById('h-sess');
+    if(el) el.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+    var hs=document.getElementById('hdr-session');
+    if(hs) hs.innerHTML='<b>'+Math.floor(s/60)+'м</b> в панели';
+  },1000);
+
+  /* 13. Часы в шапке (Москва) */
+  var hdr=document.querySelector('.header > div');
+  if(hdr){
+    var bar=document.createElement('span'); bar.className='hbar';
+    bar.innerHTML='<span class="pill" id="hdr-clock"></span>'+
+      '<span class="pill" id="hdr-session"></span>'+
+      '<button class="icon-btn" id="btn-cmd" title="Командная палитра (Ctrl+K)">⌘</button>'+
+      '<button class="icon-btn" id="btn-health" title="Здоровье системы (H)">◎</button>'+
+      '<button class="icon-btn" id="btn-rail" title="Свернуть меню (B)">▤</button>'+
+      '<button class="icon-btn" id="btn-light" title="Светлая тема (L)">◐</button>'+
+      '<button class="icon-btn" id="btn-auto" title="Автообновление (R)">⟳</button>';
+    hdr.insertBefore(bar,hdr.firstChild);
+    setInterval(function(){
+      document.getElementById('hdr-clock').innerHTML='<b>'+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'</b>';
+    },1000);
+    document.getElementById('btn-cmd').onclick=openCmd;
+    document.getElementById('btn-health').onclick=toggleHealth;
+    document.getElementById('btn-rail').onclick=function(){root.classList.toggle('lori-rail');LS.set('rail',root.classList.contains('lori-rail'))};
+    document.getElementById('btn-light').onclick=function(){root.classList.toggle('lori-light');LS.set('light',root.classList.contains('lori-light'))};
+    document.getElementById('btn-auto').onclick=function(){toggleAuto()};
+  }
+
+  /* 14. Автообновление страницы */
+  var autoT=null;
+  function toggleAuto(){
+    if(autoT){clearInterval(autoT);autoT=null;LS.set('auto',false);toast('Автообновление выключено');}
+    else{autoT=setInterval(function(){location.reload()},60000);LS.set('auto',true);toast('Автообновление: каждые 60с');}
+    var b=document.getElementById('btn-auto'); if(b) b.style.color=autoT?'var(--accent)':'';
+  }
+  if(LS.get('auto',false)) toggleAuto();
+
+  /* 15. Восстановление сохранённых режимов интерфейса */
+  if(LS.get('rail',false)) root.classList.add('lori-rail');
+  if(LS.get('compact',false)) root.classList.add('lori-compact');
+  if(LS.get('light',false)) root.classList.add('lori-light');
+  if(LS.get('nofx',false)) root.classList.add('lori-nofx');
+  document.querySelectorAll('.sidebar a').forEach(function(a){
+    var txt=a.textContent.trim();
+    a.innerHTML=a.innerHTML.replace(txt,'<span class="lbl-t">'+txt+'</span>');
+    a.title=txt;
+  });
+
+  /* 16. QR-код ключа (на странице ключа) */
+  var kpTitle=document.querySelector('.kp-title');
+  if(kpTitle){
+    var key=kpTitle.textContent.trim();
+    var box=document.createElement('div');
+    box.style.cssText='margin:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap';
+    box.innerHTML='<div class="qr-wrap"><img alt="QR ключа" loading="lazy" width="132" height="132" src="https://api.qrserver.com/v1/create-qr-code/?size=132x132&data='+encodeURIComponent(key)+'"></div>'+
+      '<div style="font-size:12px;color:var(--muted);line-height:1.8">QR-код ключа<br><b class="mono" style="color:var(--text)">'+key+'</b><br>'+
+      '<button type="button" class="btn btn-dark btn-sm" data-copy="'+key+'">Скопировать</button></div>';
+    var kp=document.querySelector('.kp'); if(kp) kp.appendChild(box);
+  }
+
+  /* 17. Подтверждение опасных действий + защита от двойной отправки */
+  document.querySelectorAll('form').forEach(function(f){
+    f.addEventListener('submit',function(){
+      var b=f.querySelector('button[type=submit]');
+      if(b){setTimeout(function(){b.disabled=true;b.style.opacity=.6},10);}
+      prog.style.width='60%';
+    });
+  });
+
+  /* 18. Кнопка «наверх» */
+  var top=document.getElementById('lori-top');
+  window.addEventListener('scroll',function(){top.classList.toggle('show',window.scrollY>420)});
+  top.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};
+
+  /* 19. Горячие клавиши */
+  document.addEventListener('keydown',function(e){
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openCmd();return}
+    if(cmd.classList.contains('open')){
+      if(e.key==='Escape'){closeCmd()}
+      if(e.key==='ArrowDown'){e.preventDefault();cmdSel=Math.min(cmdSel+1,cmdItems.length-1);renderCmd()}
+      if(e.key==='ArrowUp'){e.preventDefault();cmdSel=Math.max(cmdSel-1,0);renderCmd()}
+      if(e.key==='Enter'&&cmdItems[cmdSel]){closeCmd();cmdItems[cmdSel].run()}
+      return;
+    }
+    var tag=(e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||tag==='select') return;
+    var k=e.key.toLowerCase();
+    if(k==='/'){var f=document.querySelector('.lori-filter'); if(f){e.preventDefault();f.focus()}}
+    if(k==='h'){toggleHealth()}
+    if(k==='b'){root.classList.toggle('lori-rail');LS.set('rail',root.classList.contains('lori-rail'))}
+    if(k==='c'){root.classList.toggle('lori-compact');LS.set('compact',root.classList.contains('lori-compact'))}
+    if(k==='l'){root.classList.toggle('lori-light');LS.set('light',root.classList.contains('lori-light'))}
+    if(k==='x'){root.classList.toggle('lori-nofx');LS.set('nofx',root.classList.contains('lori-nofx'))}
+    if(k==='r'){toggleAuto()}
+    if(k==='g'){location.href='?admin&tab=generate'}
+    if(k==='escape'){document.getElementById('lori-health').classList.remove('open')}
+  });
+
+  /* 20. Предпросмотр фона в теме — без вспышки, с мгновенным применением */
+  var bgInput=document.querySelector('input[name="panel_bg"]');
+  if(bgInput){
+    var prev=document.createElement('div');
+    prev.style.cssText='margin-top:10px;height:150px;border-radius:14px;border:1px solid var(--hair);background:#0b0b0e center/cover no-repeat;box-shadow:var(--lift)';
+    bgInput.parentNode.insertBefore(prev,bgInput.nextSibling);
+    var apply=function(){
+      var u=bgInput.value.trim(); if(!u){prev.style.backgroundImage='';return}
+      var img=new Image();
+      img.onload=function(){prev.style.backgroundImage='url("'+u+'")';toast('Фон загружен: '+img.naturalWidth+'×'+img.naturalHeight)};
+      img.onerror=function(){toast('Не удалось загрузить изображение',true)};
+      img.src=u;
+    };
+    bgInput.addEventListener('change',apply); apply();
+    var fileInput=document.querySelector('input[name="panel_bg_file"]');
+    if(fileInput) fileInput.addEventListener('change',function(){
+      var f=fileInput.files&&fileInput.files[0]; if(!f)return;
+      prev.style.backgroundImage='url("'+URL.createObjectURL(f)+'")';
+      toast('Предпросмотр файла: '+Math.round(f.size/1024)+' КБ');
+    });
+  }
+
+  /* 21. Живая статистика ключей в шапке страницы «Ключи» */
+  var rowsAll=document.querySelectorAll('table tbody tr');
+  if(rowsAll.length){
+    var dead=document.querySelectorAll('tr.row-dead').length, soon=document.querySelectorAll('tr.row-soon').length;
+    var c=document.querySelector('.content');
+    var info=document.createElement('div');
+    info.className='hbar'; info.style.cssText='gap:8px;margin-bottom:12px;flex-wrap:wrap';
+    info.innerHTML='<span class="pill"><b>'+rowsAll.length+'</b> записей</span>'+
+      (soon?'<span class="pill warn"><b>'+soon+'</b> истекают ≤3 дн</span>':'')+
+      (dead?'<span class="pill bad"><b>'+dead+'</b> истекли</span>':'')+
+      (favs.length?'<span class="pill ok"><b>'+favs.length+'</b> в избранном</span>':'');
+    c.insertBefore(info,c.firstChild);
+  }
+
+  /* 22. Оффлайн-индикатор */
+  window.addEventListener('offline',function(){toast('Соединение потеряно',true)});
+  window.addEventListener('online',function(){toast('Соединение восстановлено')});
+
+  prog.style.width='100%';
+  setTimeout(function(){prog.style.opacity='0'},420);
+})();
+</script>
 </body></html>
 <?php
     exit;
@@ -1236,7 +1711,7 @@ $content = file_get_contents('php://input');
 $update = json_decode($content, true);
 if (!$update) {
     header('Content-Type: text/html; charset=utf-8');
-    echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>LORI</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#030303;color:#22c55e;font-family:Inter,system-ui;letter-spacing:6px}</style></head><body>LORI</body></html>';
+    echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>LORI — Elite Control Panel</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#030303;color:#22c55e;font-family:Inter,system-ui;letter-spacing:6px}</style></head><body>LORI</body></html>';
     exit;
 }
 
